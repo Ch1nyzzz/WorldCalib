@@ -12,10 +12,19 @@ Calibration（WMC）协议**——让 proposer 在每轮提出 candidate 之前*
 跑完之后用 mismatch **append-only 校准**自己的世界模型。两个任务上都决定性
 超过对应的对照实验：
 
+**Train passrate**：
+
 | Benchmark | 对照 best | WMC best | Δ 绝对 | Δ 相对 |
 |---|---:|---:|---:|---:|
 | **LongMemEval-s** | 0.59 @ iter_30 | **0.71** @ iter_27 | **+0.12** | **+20.3%** |
 | **LOCOMO** | 0.412 @ iter_08 | **0.475** @ iter_17 | **+0.063** | **+15.3%** |
+
+**Held-out test passrate**：
+
+| Benchmark | 对照 top-1 | WMC top-1 | Δ 绝对 | Δ 相对 |
+|---|---:|---:|---:|---:|
+| **LongMemEval-s** (400 题) | 0.5325 | **0.6075** | **+0.075** | **+14.1%** |
+| **LOCOMO** (1449 题) | 0.3692 | **0.4534** | **+0.084** | **+22.7%** |
 
 同时 proposer 总成本下降 22-25%（LME $103→$77；LOCOMO $121→$94）。
 
@@ -71,7 +80,7 @@ WMC 在标准 proposer 循环上**只多两个文件、一个协议**：
 
 ## 3. 实验结果
 
-### 3.1 优化效果
+### 3.1 优化效果 (train)
 
 baseline（iter_0，未优化）：LME 0.16；LOCOMO 0.287。
 
@@ -82,7 +91,18 @@ baseline（iter_0，未优化）：LME 0.16；LOCOMO 0.287。
 
 末轮稳定性（iter_27-30 平均）：LME 0.473 → **0.548**；LOCOMO 0.350 → **0.420**。
 
-### 3.2 突破速率 (speed-to-threshold)
+### 3.2 泛化（held-out test）
+
+各自取 train 上的 quality frontier top-3 candidate 在 test 集上重新评估：
+
+| Benchmark | Test 题数 | 对照 top-1 test | WMC top-1 test | Δ |
+|---|---:|---:|---:|---:|
+| LongMemEval-s | 400 | 0.5325 (`adaptive_recovery_temporal_facet`) | **0.6075** (`adjacent_archival_merge_1536`) | **+0.075 (+14.1%)** |
+| LOCOMO | 1449 | 0.3692 (`temporal_aligned_retrieval`) | **0.4534** (`context_expansion_with_compression`) | **+0.084 (+22.7%)** |
+
+LOCOMO 的 test 相对 gain (+22.7%) 比 train (+15.3%) 还高——WMC 找到的 scaffold 不只是 train 上更好，泛化能力也更强。
+
+### 3.3 突破速率 (speed-to-threshold)
 
 **LongMemEval-s**：
 
@@ -106,7 +126,7 @@ baseline（iter_0，未优化）：LME 0.16；LOCOMO 0.287。
 对照在 LOCOMO 上反复撞 0.412 天花板（iter 8 / 13 / 16 / 21 / 23 五次）；
 WMC 在 iter_10 一次突破到 0.45，继续推到 0.475。
 
-### 3.3 成本
+### 3.4 成本
 
 | Benchmark | Run | Proposer cost | Duration | Cache hit |
 |---|---|---:|---:|---:|
@@ -119,7 +139,7 @@ calibration 是 append-only 累积上下文（每 iter 几百 token，到 iter_2
 作为稳定 prefix 让 cache 命中率上升；proposer 因为有一份现成的全局 distill，
 Read calls 下降 28-40%（LME 731→436，LOCOMO 756→542），整体更便宜。
 
-### 3.4 Scaffold 演化亮点
+### 3.5 Scaffold 演化亮点
 
 - **LME**：对照在 iter_30 才达到 0.59（`answer_type_aware_retrieval`）；WMC 在 iter_20 就到 0.69（`multi_objective_compression_with_answer_type_scoring`），思路一致但**早 10 iter** 找到，再继续推进到 iter_27 的 `mmr_diversity_rerank_2048` = 0.71
 - **LOCOMO**：对照困在 truncation 防御 / temporal grounding 路线反复撞 0.412；WMC 在 iter_17 切到 **context expansion + compression** 组合一次突破 0.45
