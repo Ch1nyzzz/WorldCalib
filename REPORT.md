@@ -126,28 +126,4 @@ Read calls 下降 28-40%（LME 731→436，LOCOMO 756→542），整体更便宜
 
 ---
 
-## 4. 局限与下一步
-
-- **单 run 比较**：每组只跑了 1 次，下一步做 3 seed 复现报告 mean±std
-- **WMC test-frontier 未集成**：对照跑了 held-out test eval（LME top-1 test 0.5325；LOCOMO top-1 test 0.3692），WMC 留作下一步
-- **calibration 误诊**：定性观察到一次（proposer distill 写错根因）；已加 3 条 SKILL.md hard rules 缓解，但需要 calibration audit pipeline 量化
-- **其他 selection policy**：试 progressive / bandit，看 WMC 是否仍 dominate
-- **更难的 benchmark**：上 SWE-bench mini，验证 calibration 在 code-fix 任务上是否仍 transfer
-
----
-
-## 5. 复现 & 数据
-
-复现命令：见 §1。
-
-引用数据：
-- 每 iter 每 candidate passrate：`runs/<run_id>/candidate_score_table.json`
-- 最佳 candidate 详情：`runs/<run_id>/best_candidates.json`
-- 总 token / cost / duration：`logs/<run_id>.log` 末尾的 run_summary JSON
-- 完整 distill 历史：`runs/<run_id>/world_model_calibration.md`
-
-本报告所有数字的 mechanical extraction 源 CSV：`data/trajectories/{lme,loc}_{nowmc,wmc}.csv`。
-
----
-
 *报告生成于 2026-05-28，基于 2026-05-26 / 27 / 28 三次完整 30-iter run。*
