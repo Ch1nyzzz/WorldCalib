@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.venv/
+build/
+dist/
+runs/
+logs/
+.env
+
+# Symlinked data — points outside the repo, would break for cloners
+data/locomo/
+data/longmemeval/
