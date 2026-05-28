@@ -993,6 +993,7 @@ class LocomoOptimizer:
             bandit_policy=bandit_policy,
         )
         self._copy_workspace_state(workspace_dir / "state.md")
+        self._write_runtime_config(workspace_dir)
         self._sync_calibration_into_workspace(workspace_dir, iteration)
         self._prepare_workspace_run_store(iteration)
         self._deploy_mcp_server_assets(workspace_dir)
@@ -1308,6 +1309,34 @@ class LocomoOptimizer:
         src = self.run_dir / "state.md"
         if src.exists():
             shutil.copy2(src, dest)
+
+    def _write_runtime_config(self, workspace_dir: Path) -> None:
+        """Drop ground-truth runtime config into the proposer's cwd.
+
+        Without this file the proposer must infer the target model from
+        ``src/worldcalib/model.py`` defaults (``DEFAULT_MODEL``,
+        ``enable_thinking``, ``max_tokens=256``). Those defaults are
+        Qwen3-flavored and are overridden by the launcher at runtime, so
+        proposer inference based on them is systematically wrong — observed
+        as the "Qwen3 hidden thinking" red herring in early WMC runs.
+        """
+
+        cfg = self.config
+        lines = [
+            "# Runtime config (ground truth — read before any model-family inference)",
+            "",
+            f"- target_model: `{cfg.model}`",
+            f"- target_base_url: `{cfg.base_url}`",
+            f"- target_timeout_s: {cfg.eval_timeout_s}",
+            "",
+            "Notes for the proposer:",
+            "- `src/worldcalib/model.py` `DEFAULT_MODEL` / `enable_thinking` / `max_tokens=256` are file-level defaults; the launcher overrides `model` and `base_url` via CLI at runtime. **Use the values above, not the file defaults, when reasoning about target behavior.**",
+            "- `max_tokens=256` IS still the per-call cap unless a scaffold overrides it. Tasks with `completion_tokens == 256` and empty `prediction` mean the model hit the cap, NOT necessarily that any specific model family's hidden-thinking ate the budget.",
+            "- Do not name a specific model family (Qwen / Claude / GPT / etc.) in your distill unless that name appears verbatim in `target_model` above.",
+        ]
+        (workspace_dir / "runtime_config.md").write_text(
+            "\n".join(lines) + "\n", encoding="utf-8"
+        )
 
     def _sync_calibration_into_workspace(
         self, workspace_dir: Path, iteration: int

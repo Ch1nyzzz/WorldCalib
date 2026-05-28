@@ -182,9 +182,13 @@ the next iter's measurements could disconfirm.
 
 0. **Read calibration & distill last iter (WorldCalib).** Before any other
    step:
-   a. `cat ./world_model_calibration.md`. If the file is missing (it
+   a. `cat ./runtime_config.md` first to get the **ground-truth target_model
+      and target_base_url**. Use those values whenever you reason about target
+      behavior or write distill entries — do NOT infer model family from
+      `src/worldcalib/model.py` defaults (they are launcher-overridden).
+   b. `cat ./world_model_calibration.md`. If the file is missing (it
       shouldn't be — the optimizer stages it), abort and report the issue.
-   b. Check whether `./prev_prediction.md` exists (the optimizer stages it
+   c. Check whether `./prev_prediction.md` exists (the optimizer stages it
       when iteration ≥ 1). If it does, read it PLUS the actual outcome
       artifacts for the previous iter from the run history (trace, score,
       `pending_eval.json`, candidate_results — locate via the *Evidence
@@ -200,7 +204,7 @@ the next iter's measurements could disconfirm.
 
       If `./prev_prediction.md` is absent (iter 0), skip the append — start
       cold.
-   c. Re-read `./world_model_calibration.md` (possibly just-appended) so the
+   d. Re-read `./world_model_calibration.md` (possibly just-appended) so the
       rest of this iter reasons from the latest version.
 1. **Analyze.** Read the available evidence (see *Evidence interface* below) and
    deep-read both failed *and* successful trajectories for recent iterations.
