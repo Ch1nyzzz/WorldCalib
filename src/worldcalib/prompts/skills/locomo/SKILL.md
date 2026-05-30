@@ -267,9 +267,9 @@ The `runstore-tools` MCP server exposes:
 - evidence-link tools — `mcp__runstore-tools__runstore_link_for`, `mcp__runstore-tools__runstore_link_explain_iteration`,
   `mcp__runstore-tools__runstore_link_explain_proposal`, `mcp__runstore-tools__runstore_link_chain_task`
 
-The `optimizer1-traces` MCP server adds semantic search over historical iter
+The `worldcalib-traces` MCP server adds semantic search over historical iter
 diffs (the SQL `runstore_fact_*` tools only support exact-id lookups):
-- `mcp__optimizer1-traces__trace_similar(diff_or_query, k?)` — find past iters
+- `mcp__worldcalib-traces__trace_similar(diff_or_query, k?)` — find past iters
   whose candidate diff is semantically closest to a natural-language description
   or a candidate diff you are considering (cosine over embeddings). Useful to
   avoid re-trying mechanisms that already failed and to surface non-obvious
@@ -295,9 +295,9 @@ The `runstore-tools` MCP server exposes:
 - evidence-link tools — `mcp__runstore-tools__runstore_link_for`, `mcp__runstore-tools__runstore_link_explain_iteration`,
   `mcp__runstore-tools__runstore_link_explain_proposal`, `mcp__runstore-tools__runstore_link_chain_task`
 
-The `optimizer1-traces` MCP server adds semantic search over historical iter
+The `worldcalib-traces` MCP server adds semantic search over historical iter
 diffs (the SQL `runstore_fact_*` tools only support exact-id lookups):
-- `mcp__optimizer1-traces__trace_similar(diff_or_query, k?)` — find past iters
+- `mcp__worldcalib-traces__trace_similar(diff_or_query, k?)` — find past iters
   whose candidate diff is semantically closest to a natural-language description
   or a candidate diff you are considering (cosine over embeddings). Useful to
   avoid re-trying mechanisms that already failed and to surface non-obvious
@@ -324,9 +324,9 @@ The `runstore-tools` MCP server exposes:
 - evidence-link tools — `mcp__runstore-tools__runstore_link_for`, `mcp__runstore-tools__runstore_link_explain_iteration`,
   `mcp__runstore-tools__runstore_link_explain_proposal`, `mcp__runstore-tools__runstore_link_chain_task`
 
-The `optimizer1-traces` MCP server adds semantic search over historical iter
+The `worldcalib-traces` MCP server adds semantic search over historical iter
 diffs (the SQL `runstore_fact_*` tools only support exact-id lookups):
-- `mcp__optimizer1-traces__trace_similar(diff_or_query, k?)` — find past iters
+- `mcp__worldcalib-traces__trace_similar(diff_or_query, k?)` — find past iters
   whose candidate diff is semantically closest to a natural-language description
   or a candidate diff you are considering (cosine over embeddings). Useful to
   avoid re-trying mechanisms that already failed and to surface non-obvious

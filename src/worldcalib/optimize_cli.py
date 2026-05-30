@@ -183,7 +183,28 @@ def _add_common_optimize_args(parser: argparse.ArgumentParser) -> None:
         default=None,
         help=(
             "Path to a previous run's world_model_calibration.md to seed this run. "
-            "If omitted, the run starts with the bootstrap template."
+            "If omitted, the run starts with the bootstrap template. "
+            "Ignored when --proposer-variant=critic (that variant has no prose file)."
+        ),
+    )
+    parser.add_argument(
+        "--proposer-variant",
+        choices=("prose", "critic"),
+        default="prose",
+        help=(
+            "Proposer world-model variant. 'prose' = append-only "
+            "world_model_calibration.md protocol (default). 'critic' = ledger + "
+            "adversarial reference-class critic subagent, no prose calibration file "
+            "(routes to the <benchmark>_critic skill)."
+        ),
+    )
+    parser.add_argument(
+        "--critic-gate-enforce",
+        action="store_true",
+        help=(
+            "Critic variant only: reject a candidate that did not produce a "
+            "compliant critique.md / P(regress). Default off (soft): compliance "
+            "is logged but the candidate is still evaluated."
         ),
     )
 
@@ -233,7 +254,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     out_dir = args.out or Path("runs") / run_id
 
-    _seed_calibration(out_dir, args.prev_calibration)
+    # The critic variant has no prose calibration file to seed.
+    if args.proposer_variant != "critic":
+        _seed_calibration(out_dir, args.prev_calibration)
 
     scaffolds_csv = (
         _csv(args.scaffolds)
@@ -279,6 +302,8 @@ def main(argv: list[str] | None = None) -> int:
         proposer_docker_home=args.proposer_docker_home,
         proposer_docker_env=tuple(args.proposer_docker_env),
         proposer_docker_mount=tuple(args.proposer_docker_mount),
+        proposer_variant=args.proposer_variant,
+        critic_gate_enforce=args.critic_gate_enforce,
     )
 
     if args.task == "longmemeval":
