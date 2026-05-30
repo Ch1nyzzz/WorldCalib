@@ -1,6 +1,6 @@
 ---
-name: worldcalib-proposer-longmemeval
-description: Optimizer1 proposer skill for LongMemEval long-term memory QA. Runs one optimization iteration — analyze evidence, design one mechanism-level change to the memory scaffold source, write pending_eval.json.
+name: worldcalib-proposer-longmemeval-critic
+description: WorldCalib proposer skill for LongMemEval (ledger + adversarial-critic variant). Runs one optimization iteration — analyze evidence, design one mechanism-level change, then submit the candidate to an adversarial reference-class critic subagent grounded in the RunStore ledger before writing pending_eval.json. No prose calibration file.
 ---
 
 # Optimizer1 proposer — LongMemEval memory QA
@@ -133,79 +133,78 @@ They are not stylistic preferences.
    inside the scaffold). The candidate is dropped before eval runs — your
    iter is wasted with no signal.
 
-3. **When distilling a failed iter, read the actual error before
-   hypothesizing.** If `candidate_results/<iter>.json` shows every task has
-   `prediction=""` and `prompt_tokens=0` / `completion_tokens=0`, the scaffold
-   crashed at construction or call time — NOT a model/prompt issue. Read
-   `candidate_results/<iter>.json → tasks[0].error` and the proposer's own
-   `diff.patch` to figure out which import or signature broke. Do NOT write a
-   speculative diagnosis like "wrong scaffold_name" into the calibration file
-   when the real cause is a code-level error; future iters will trust that
-   wrong belief and waste cycles re-trying.
+3. **When a prior iter failed, read the actual error before hypothesizing.**
+   If `candidate_results/<iter>.json` shows every task has `prediction=""` and
+   `prompt_tokens=0` / `completion_tokens=0`, the scaffold crashed at
+   construction or call time — NOT a model/prompt issue. Read
+   `candidate_results/<iter>.json → tasks[0].error` and that iter's `diff.patch`
+   to figure out which import or signature broke. A code-level crash is an
+   implementation bug, not a world-model signal: do not let it masquerade as a
+   mechanism-level lesson. Use the RunStore ledger (below) for what actually
+   moved the metric, and a lightweight smoke check (workflow step 5) to catch
+   crashes before eval.
 
-## Calibration protocol (WorldCalib)
+## World model = the RunStore ledger (WorldCalib — ledger + critic variant)
 
-This skill runs inside **WorldCalib**, a forked playground that adds a
-feedback-calibrated proposer protocol on top of the standard Optimizer1 loop.
-The only structural delta vs default Optimizer1: one append-only file per run
-and one new file per iter. Everything else (analysis, hypothesis, edit,
-`pending_eval.json`) is unchanged.
+This skill runs inside **WorldCalib**. Unlike the prose-calibration variant,
+**there is no `world_model_calibration.md` and no distill step.** The world
+model is the **RunStore ledger** — the `runstore.db` the optimizer writes
+automatically after every eval. It is the only world model that does not lie,
+because it is measured, not narrated. You do not maintain it; you *query* it
+(via the RunStore tools in the *Evidence interface* below) and you are *held
+to it* by an adversarial critic before your candidate is accepted.
 
-The optimizer copies the run-level calibration into your workspace at the
-start of every iter, and propagates your appended workspace copy back to the
-run dir after you exit. Always work with the **workspace-local** filenames
-below — they work identically whether the proposer runs natively or inside
-the docker sandbox.
+What the ledger already records for every past iter — query it, do not
+re-derive it from prose:
 
-- **Per run, append-only (lives at `./world_model_calibration.md` in your
-  cwd; promoted back to `runs/<run_id>/world_model_calibration.md`
-  automatically).** The optimizer seeds it at iter 0 with an observability
-  template. Every iter ≥ 1 MUST append exactly one new
-  `## iter_PREV → iter_THIS distill` section reflecting last iter's
-  prediction vs observed outcome. Never rewrite or delete prior sections —
-  this file is the run's accumulated world-model belief.
+- the candidate's diff, its `passrate` and `average_score`;
+- its outcome **relative to its parent**: `passrate_delta`, `regression_count`,
+  `breakthrough_count` (i.e. did it regress, and by how much / on how many
+  tasks);
+- per-task pass/fail and trace spans.
 
-- **Previous iter's prediction (available as `./prev_prediction.md` if it
-  exists).** The optimizer pre-stages the prior iter's `prediction.md` here
-  so you don't have to know container-side mount paths.
+`trace_similar(your draft diff or description, k)` returns the **reference
+class**: the historically most similar candidates and their real outcomes.
+That base rate — *"of the k candidates most like mine, how many regressed"* —
+is the prior your prediction must be anchored to. This is what replaces the
+accumulated prose belief: a fresh, candidate-specific, measured base rate
+fetched at proposal time.
 
-- **Per iter, your "bet" (`./prediction.md` in your cwd).** Written BEFORE
-  you edit any source. Records the outcome you expect from the candidate
-  so the next iter can score the prediction against actual feedback.
+Per-iter files (workspace-local; work identically native or in the docker
+sandbox):
 
-Only train passrate, trace, and failure-type distribution are observable
-here — no shadow gate, no hidden score. **Do NOT write generalization or
-hidden-score judgements** into the calibration file. Only write claims that
-the next iter's measurements could disconfirm.
+- **`./prediction.md` — your "bet"**, written BEFORE you edit source. Includes
+  an explicit `P(regress)`. The optimizer scores it automatically against the
+  ledger after eval; **you never distill it by hand.**
+- **`./critique.md` — the critic subagent's adversarial review** (workflow
+  step 3.5). Mandatory; `pending_eval.json` is rejected without it.
+- **`./calibration_track_record.md` — your own scored history**, staged by the
+  optimizer if available. It reports how well your past `P(regress)` calls
+  matched reality (Brier, directional bias). Read it and **correct your own
+  optimism** — if it says you systematically under-call regressions on a class
+  of change, raise your `P(regress)` for that class this iter.
+
+Only train passrate, trace, and failure-type distribution are observable here —
+no shadow gate, no hidden score.
 
 ## Workflow
 
-0. **Read calibration & distill last iter (WorldCalib).** Before any other
-   step:
+0. **Orient against the ledger & your own track record (WorldCalib).** Before
+   any other step:
    a. `cat ./runtime_config.md` first to get the **ground-truth target_model
       and target_base_url**. Use those values whenever you reason about target
-      behavior or write distill entries — do NOT infer model family from
-      `src/worldcalib/model.py` defaults (they are launcher-overridden).
-   b. `cat ./world_model_calibration.md`. If the file is missing (it
-      shouldn't be — the optimizer stages it), abort and report the issue.
-   c. Check whether `./prev_prediction.md` exists (the optimizer stages it
-      when iteration ≥ 1). If it does, read it PLUS the actual outcome
-      artifacts for the previous iter from the run history (trace, score,
-      `pending_eval.json`, candidate_results — locate via the *Evidence
-      interface* below). Then **append** one section to
-      `./world_model_calibration.md` with this exact shape:
-
-      ```
-      ## iter_<PREV> → iter_<THIS> distill (<ISO-8601 UTC>)
-      - Outcome mismatch: <which predicted observable diverged; cite numbers>
-      - Unresolved: <what this iter's evidence couldn't tell us>
-      - Belief update: <one sentence revising the world model>
-      ```
-
-      If `./prev_prediction.md` is absent (iter 0), skip the append — start
-      cold.
-   d. Re-read `./world_model_calibration.md` (possibly just-appended) so the
-      rest of this iter reasons from the latest version.
+      behavior — do NOT infer model family from `src/worldcalib/model.py`
+      defaults (they are launcher-overridden).
+   b. If `./calibration_track_record.md` exists, read it: it is the optimizer's
+      mechanical scoring of your past `P(regress)` calls against real outcomes
+      (Brier score, directional bias). Note any systematic bias — e.g.
+      "under-calls regressions on retrieval-only changes" — and carry the
+      correction into this iter's prediction.
+   c. Do **not** hand-distill anything and do **not** look for
+      `world_model_calibration.md` — this variant has none. Last iter's
+      prediction was already scored against the ledger automatically; the
+      lesson lives in the ledger (query it via the *Evidence interface*) and in
+      your track record, not in a prose file you append to.
 1. **Analyze.** Read the available evidence (see *Evidence interface* below) and
    deep-read both failed *and* successful trajectories for recent iterations.
    Classify recurring failure modes — whether failures come from retrieval,
@@ -224,6 +223,7 @@ the next iter's measurements could disconfirm.
    ## Mechanism (why the change should move the metric)
    ## Outcome prediction
    - Train passrate Δ: [low, high]         (e.g. [+0.005, +0.020])
+   - P(regress): <0.00–1.00>               (probability final passrate < parent)
    - Failure type movement: <which clusters shrink / grow>
    - Trace movement: <what should appear or disappear in spans>
    - Side effects to watch: <timeout, runtime, regression>
@@ -231,32 +231,66 @@ the next iter's measurements could disconfirm.
    <which of the above, if observed, would refute the mechanism>
    ```
 
+   `P(regress)` is the load-bearing field. Seed it from the reference-class
+   base rate — call `trace_similar` on your planned change and read how many of
+   the nearest neighbours regressed — then adjust, and state the adjustment.
+   Do not default to optimism: if the base rate says half of similar changes
+   regressed, a `P(regress)` near 0 needs an explicit, falsifiable reason. The
+   `Train passrate Δ` interval must be consistent with `P(regress)` (you cannot
+   claim a tight positive Δ while also claiming a high regression probability).
+   This file is provisional until the critic (step 5) has challenged it.
+
 4. **Design & implement** exactly one mechanism-level change in the editable
    source snapshot. One candidate tests one hypothesis — if you are tempted to
    add "and also...", that is a second candidate; drop it.
-5. **Smoke check.** Run a lightweight syntax/import check on the edited snapshot.
-6. **Write `pending_eval.json`** with exactly one candidate.
+5. **Adversarial reference-class review (critic subagent) — MANDATORY.**
+   Before finalizing, submit the candidate to an adversarial critic. Spawn
+   **one** general-purpose subagent whose sole job is to argue, from the
+   ledger, that this candidate will regress. Hand it your candidate one-liner,
+   mechanism, and the actual diff. Instruct the subagent to:
+   a. call `trace_similar(<the diff or a faithful description>, k=8)`;
+   b. for the nearest neighbours, look up their real outcomes via the RunStore
+      tools (`runstore_fact_candidate_outcome` / `trace_compare_iterations` /
+      iteration metadata) — specifically `passrate_delta` and
+      `regression_count`;
+   c. compute the **base rate** ("of the N nearest, X regressed, Y flat,
+      Z advanced") and name the **dominant failure mode of the regressed
+      neighbours**;
+   d. write `./critique.md` with exactly this shape and return its strongest
+      single challenge:
+
+      ```
+      # iter_<THIS> critique
+      ## Reference class (trace_similar query + k)
+      - <sim> iter_<NNN>  passrate_delta=<…> regression_count=<…>
+      - … (the k nearest)
+      ## Base rate
+      - of <N> nearest: <X> regressed / <Y> flat / <Z> advanced  → P(regress|class) ≈ <…>
+      ## Dominant failure mode of regressed neighbours
+      <one paragraph, grounded in their real per-task outcomes>
+      ## Challenge
+      <the single strongest, falsifiable reason THIS candidate will regress>
+      ## Verdict
+      <revise | proceed-with-justification>
+      ```
+
+   Then **you must respond** to the challenge: either **revise** the candidate
+   to defuse it (return to step 4 and re-run this review — at most 2 critic
+   rounds), or keep it and add a `## Critic response` section to
+   `./prediction.md` giving a falsifiable reason the dominant failure mode does
+   not apply, AND reconcile your `P(regress)` with the critic's base rate. A
+   candidate may not proceed if its only answer to the challenge is optimism.
+6. **Smoke check.** Run a lightweight syntax/import check on the edited snapshot.
+7. **Write `pending_eval.json`** with exactly one candidate.
 
 ## Evidence interface
 
-<!-- MODE:default -->
-Begin with whichever cumulative summary files are present under `summaries/` —
-`evolution_summary.jsonl` (the full event history) and `best_candidates.json`
-(the current quality frontier). If no `summaries/` directory is provided this
-run, work directly from the raw `reference_iterations/iter_NNN/` bundles
-instead. Either way, inspect raw `reference_iterations/iter_NNN/` bundles and
-`traces/` files selectively to validate the failure mode and the source change.
-Do not infer a mechanism from summaries alone.
-<!-- END MODE:default -->
-<!-- MODE:organized -->
-Read `state.md` first for orientation — it is a current state snapshot only, not
-evidence, not diagnosis, not a plan. Then use the `runstore-tools` MCP server to
-inspect candidate outcomes, iteration comparisons, task histories, traces, and
-modifications before opening raw files. Use the tool results to decide which raw
-`reference_iterations/` and `traces/` files to read for verification and
-concrete excerpts. Cumulative summary files are not provided in this mode.
+This variant is **ledger-first**. The RunStore MCP servers are registered in
+your workspace regardless of run mode — query them before opening raw files,
+and fall back to raw `reference_iterations/iter_NNN/` and `traces/` bundles only
+to verify a failure mode or pull a concrete excerpt.
 
-The `runstore-tools` MCP server exposes:
+The `runstore-tools` MCP server (structured facts, exact-id lookups):
 - raw artifact tools — `mcp__runstore-tools__runstore_artifact_list`, `mcp__runstore-tools__runstore_artifact_get`,
   `mcp__runstore-tools__runstore_artifact_search`
 - structured fact tools — `mcp__runstore-tools__runstore_fact_state`,
@@ -267,72 +301,20 @@ The `runstore-tools` MCP server exposes:
 - evidence-link tools — `mcp__runstore-tools__runstore_link_for`, `mcp__runstore-tools__runstore_link_explain_iteration`,
   `mcp__runstore-tools__runstore_link_explain_proposal`, `mcp__runstore-tools__runstore_link_chain_task`
 
-The `worldcalib-traces` MCP server adds semantic search over historical iter
-diffs (the SQL `runstore_fact_*` tools only support exact-id lookups):
-- `mcp__worldcalib-traces__trace_similar(diff_or_query, k?)` — find past iters
-  whose candidate diff is semantically closest to a natural-language description
-  or a candidate diff you are considering (cosine over embeddings). Useful to
-  avoid re-trying mechanisms that already failed and to surface non-obvious
-  prior attempts the `runstore_fact_*` tools cannot reach without knowing the
-  candidate id.
-<!-- END MODE:organized -->
-<!-- MODE:organized-no-state -->
-Use the `runstore-tools` MCP server first to inspect candidate outcomes,
-iteration comparisons, task histories, traces, and modifications before opening
-raw files. This organized run intentionally does not provide `state.md`; do not
-look for it. Use the tool results to decide which raw `reference_iterations/`
-and `traces/` files to read for verification and concrete excerpts. Cumulative
-summary files are not provided in this mode.
-
-The `runstore-tools` MCP server exposes:
-- raw artifact tools — `mcp__runstore-tools__runstore_artifact_list`, `mcp__runstore-tools__runstore_artifact_get`,
-  `mcp__runstore-tools__runstore_artifact_search`
-- structured fact tools — `mcp__runstore-tools__runstore_fact_state`,
-  `mcp__runstore-tools__runstore_fact_candidate_outcome`, `mcp__runstore-tools__runstore_fact_compare_iterations`,
-  `mcp__runstore-tools__runstore_fact_task_history`, `mcp__runstore-tools__runstore_fact_trace`,
-  `mcp__runstore-tools__runstore_fact_modification`, `mcp__runstore-tools__runstore_fact_proposer_call`,
-  `mcp__runstore-tools__runstore_fact_file_history`, `mcp__runstore-tools__runstore_fact_proposal`
-- evidence-link tools — `mcp__runstore-tools__runstore_link_for`, `mcp__runstore-tools__runstore_link_explain_iteration`,
-  `mcp__runstore-tools__runstore_link_explain_proposal`, `mcp__runstore-tools__runstore_link_chain_task`
-
-The `worldcalib-traces` MCP server adds semantic search over historical iter
-diffs (the SQL `runstore_fact_*` tools only support exact-id lookups):
-- `mcp__worldcalib-traces__trace_similar(diff_or_query, k?)` — find past iters
-  whose candidate diff is semantically closest to a natural-language description
-  or a candidate diff you are considering (cosine over embeddings). Useful to
-  avoid re-trying mechanisms that already failed and to surface non-obvious
-  prior attempts the `runstore_fact_*` tools cannot reach without knowing the
-  candidate id.
-<!-- END MODE:organized-no-state -->
-<!-- MODE:organized-summaries -->
-Read `state.md` first for orientation — it is a current state snapshot only, not
-evidence, not diagnosis, not a plan. Then use the `runstore-tools` MCP server to
-inspect candidate outcomes, iteration comparisons, task histories, traces, and
-modifications before opening raw files. Cumulative summary files are also
-available in this ablation; treat them only as orientation — evidence claims
-should be grounded in RunStore tool results or raw trace/reference
-excerpts.
-
-The `runstore-tools` MCP server exposes:
-- raw artifact tools — `mcp__runstore-tools__runstore_artifact_list`, `mcp__runstore-tools__runstore_artifact_get`,
-  `mcp__runstore-tools__runstore_artifact_search`
-- structured fact tools — `mcp__runstore-tools__runstore_fact_state`,
-  `mcp__runstore-tools__runstore_fact_candidate_outcome`, `mcp__runstore-tools__runstore_fact_compare_iterations`,
-  `mcp__runstore-tools__runstore_fact_task_history`, `mcp__runstore-tools__runstore_fact_trace`,
-  `mcp__runstore-tools__runstore_fact_modification`, `mcp__runstore-tools__runstore_fact_proposer_call`,
-  `mcp__runstore-tools__runstore_fact_file_history`, `mcp__runstore-tools__runstore_fact_proposal`
-- evidence-link tools — `mcp__runstore-tools__runstore_link_for`, `mcp__runstore-tools__runstore_link_explain_iteration`,
-  `mcp__runstore-tools__runstore_link_explain_proposal`, `mcp__runstore-tools__runstore_link_chain_task`
-
-The `worldcalib-traces` MCP server adds semantic search over historical iter
-diffs (the SQL `runstore_fact_*` tools only support exact-id lookups):
-- `mcp__worldcalib-traces__trace_similar(diff_or_query, k?)` — find past iters
-  whose candidate diff is semantically closest to a natural-language description
-  or a candidate diff you are considering (cosine over embeddings). Useful to
-  avoid re-trying mechanisms that already failed and to surface non-obvious
-  prior attempts the `runstore_fact_*` tools cannot reach without knowing the
-  candidate id.
-<!-- END MODE:organized-summaries -->
+The `worldcalib-traces` MCP server (semantic search — the backbone of the
+reference-class critic; the SQL `runstore_fact_*` tools only do exact-id lookups):
+- `mcp__worldcalib-traces__trace_similar(diff_or_query, k?)` — historical iters whose
+  candidate diff is semantically closest to a description or a diff you are considering
+  (cosine over embeddings); returns `{iteration, similarity, status_counts}`. This is how
+  step 5 builds the reference class and base rate.
+- `mcp__worldcalib-traces__trace_candidate_outcome(iteration, candidate_id)` — full per-candidate
+  outcome: passrate, modified files, regressed/breakthrough task examples.
+- `mcp__worldcalib-traces__trace_compare_iterations(left, right)` — per-task regression/breakthrough
+  classification + score delta between two iters (use a neighbour vs its parent to read its real
+  `passrate_delta` / `regression_count`).
+- `mcp__worldcalib-traces__trace_iteration_metadata`, `mcp__worldcalib-traces__trace_file_history`,
+  `mcp__worldcalib-traces__trace_task_history` — iteration passrate/frontier metadata, and per-file /
+  per-task history.
 
 ## Quality gate
 
@@ -351,6 +333,12 @@ Before writing `pending_eval.json`, verify the candidate:
   special cases, is overfitting and will be rejected even if train `passrate`
   rises.
 - **uses the isolated source snapshot** for source edits.
+- **has passed the adversarial critic (step 5):** `./critique.md` exists with a
+  populated reference class and base rate, and `./prediction.md` carries a
+  `P(regress)` reconciled with that base rate (plus a `## Critic response`
+  section if you proceeded over a `revise` verdict). A candidate with no
+  `critique.md`, no `P(regress)`, or a `P(regress)` that contradicts its own
+  reference class will be rejected.
 
 ## Edit scope
 

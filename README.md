@@ -92,4 +92,4 @@ LOCOMO 和 LongMemEval-s 的数据通过 symlink 指向 `/data/home/yuhan/Optimi
 - benchmark 跑完后用 mismatch 校准 `world_model_calibration.md`
 - 不维护独立 reward model；utility 是手写函数，写在 `objective.md`
 
-SKILL.md 当前是 Optimizer1 原始版本，**待按上述协议改写**；MCP server `optimizer1-traces` 的引用待替换或删除。
+SKILL.md 当前是 Optimizer1 原始版本，**待按上述协议改写**；MCP server `worldcalib-traces` 的引用待替换或删除。
