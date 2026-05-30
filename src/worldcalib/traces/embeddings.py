@@ -77,40 +77,63 @@ class DiffEmbedder:
         self._timeout_s = timeout_s
         self._client = None  # lazy
 
-    def _get_client(self):
-        if self._client is None:
-            from openai import OpenAI  # local import keeps import-graph cheap
+    def _resolve_api_key(self) -> str | None:
+        if self._api_key is not None:
+            return self._api_key
+        import os
 
-            kwargs: dict[str, object] = {}
-            if self._api_key is not None:
-                kwargs["api_key"] = self._api_key
-            if self._base_url is not None:
-                kwargs["base_url"] = self._base_url
-            kwargs["timeout"] = self._timeout_s
-            self._client = OpenAI(**kwargs)
-        return self._client
+        return os.environ.get("OPENAI_API_KEY")
+
+    def _resolve_base_url(self) -> str:
+        import os
+
+        base = self._base_url or os.environ.get("OPENAI_BASE_URL") or "https://api.openai.com/v1"
+        return base.rstrip("/")
 
     def embed(self, text: str) -> DiffEmbedding | None:
         """Return embedding for `text`, or None on empty/error.
 
-        Truncation: OpenAI's text-embedding-3-small accepts up to 8191
-        tokens; we cap input chars to ~32K to stay safely under that.
-        Larger diffs get tail-truncated.
+        Calls an OpenAI-compatible ``/embeddings`` endpoint over the standard
+        library (``urllib``) rather than the ``openai`` SDK, so it works in
+        minimal runtimes — notably the proposer docker image, which does not
+        ship the SDK (a missing import there silently disabled trace_similar).
+
+        Truncation: ``text-embedding-3-small`` accepts up to 8191 tokens; we
+        cap input chars to ~32K to stay safely under that. Larger diffs get
+        tail-truncated.
         """
 
         if not text or not text.strip():
             return None
+        api_key = self._resolve_api_key()
+        if not api_key:
+            _LOG.warning("DiffEmbedder.embed: no OPENAI_API_KEY available")
+            return None
         clipped = text if len(text) <= 32_000 else text[:32_000]
+
+        import json
+        import urllib.request
+
+        url = f"{self._resolve_base_url()}/embeddings"
+        payload = json.dumps({"model": self.model, "input": clipped}).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
         try:
-            client = self._get_client()
-            response = client.embeddings.create(model=self.model, input=clipped)
+            with urllib.request.urlopen(req, timeout=self._timeout_s) as resp:
+                body = json.load(resp)
         except Exception as exc:  # noqa: BLE001 — degrade gracefully
             _LOG.warning("DiffEmbedder.embed failed: %r", exc)
             return None
         try:
-            data = response.data[0]
-            vector = tuple(float(v) for v in data.embedding)
-        except (AttributeError, IndexError, TypeError) as exc:
+            vector = tuple(float(v) for v in body["data"][0]["embedding"])
+        except (KeyError, IndexError, TypeError) as exc:
             _LOG.warning("DiffEmbedder: malformed response (%r)", exc)
             return None
         return DiffEmbedding(
