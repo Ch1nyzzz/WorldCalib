@@ -754,7 +754,10 @@ class LocomoOptimizer:
                 call_dir=call_dir,
                 result=result,
             )
-        if result.returncode != 0 or result.timed_out or not self.pending_eval_path.exists():
+        proposer_unclean = result.returncode != 0 or result.timed_out
+        if not self.pending_eval_path.exists() or (
+            proposer_unclean and not self._pending_eval_is_salvageable()
+        ):
             self._append_event(
                 {
                     "iteration": iteration,
@@ -768,6 +771,26 @@ class LocomoOptimizer:
                 }
             )
             return []
+        if proposer_unclean:
+            # Salvage a candidate the proposer had already finished writing
+            # before it was killed. max-effort + critic-subagent sessions
+            # routinely complete pending_eval.json but fail to exit within
+            # propose_timeout_s; the kill (returncode=None) also drops the
+            # final usage message, so metrics show 0 tokens even though a
+            # full iteration's worth of work landed on disk. Discarding it
+            # wastes the whole iteration — instead we keep the candidate and
+            # let the normal parse / critic / access gates below validate it.
+            self._append_event(
+                {
+                    "iteration": iteration,
+                    "event": "proposer_candidate_recovered_after_failure",
+                    "selection_policy": policy_name,
+                    "budget": budget,
+                    "returncode": result.returncode,
+                    "timed_out": result.timed_out,
+                    "proposer_metrics": getattr(result, "metrics", {}),
+                }
+            )
 
         try:
             pending = json.loads(self.pending_eval_path.read_text(encoding="utf-8"))
@@ -3879,6 +3902,24 @@ class LocomoOptimizer:
         if workspace_pending.exists():
             self._copy_if_exists(workspace_pending, self.pending_eval_path)
             self._copy_if_exists(workspace_pending, call_dir / "pending_eval.raw.json")
+
+    def _pending_eval_is_salvageable(self) -> bool:
+        """Whether a written ``pending_eval.json`` can be salvaged.
+
+        A timed-out or non-zero-exit proposer may still have written a
+        complete candidate before it was killed. Returns ``True`` only when
+        the archived ``pending_eval.json`` parses cleanly and holds exactly
+        one candidate, so a salvage cannot smuggle in a truncated or empty
+        file. A partial write fails the parse and is treated as a real
+        failure rather than retried (a retry would just time out again).
+        """
+        if not self.pending_eval_path.exists():
+            return False
+        try:
+            pending = json.loads(self.pending_eval_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return False
+        return len(_pending_candidates(pending)) == 1
 
     def _normalize_workspace_candidate_paths(
         self,

@@ -126,7 +126,7 @@ def _add_common_optimize_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--claude-base-url", default=None)
     parser.add_argument("--claude-auth-token", default=None)
     parser.add_argument("--claude-native-auth", action="store_true")
-    parser.add_argument("--propose-timeout-s", type=int, default=1800)
+    parser.add_argument("--propose-timeout-s", type=int, default=2400)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--max-context-chars", type=int, default=6000)
     parser.add_argument("--eval-workers", type=int, default=64)
