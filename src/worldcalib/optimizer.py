@@ -1228,8 +1228,17 @@ class LocomoOptimizer:
         the Codex CLI's own environment.
         """
 
+        runstore_db = (
+            Path("/runstore/runstore.db")
+            if self.config.proposer_sandbox.strip().lower() == "docker"
+            else self.run_store.db_path
+        )
         env: dict[str, str] = {
             "TRACE_DB": str(self._workspace_visible_path(workspace_dir, "traces/index.db")),
+            # trace_similar joins proposal_outcomes here for a deterministic,
+            # parent-relative passrate_delta per neighbour (the critic must not
+            # hand-compute the base rate).
+            "RUNSTORE_DB": str(runstore_db),
             "PYTHONPATH": str(self._mcp_pythonpath(workspace_dir)),
         }
         for key in ("OPENAI_API_KEY", "OPENAI_BASE_URL", "DIFF_EMBEDDING_MODEL"):

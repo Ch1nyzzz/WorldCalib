@@ -31,6 +31,50 @@ def _resolve_db_path() -> Path:
     return Path(raw)
 
 
+def _resolve_runstore_path() -> Path | None:
+    """Path to the run's ``runstore.db`` (holds ``proposal_outcomes`` with the
+    optimizer's authoritative, parent-relative ``passrate_delta``).
+
+    Set via ``RUNSTORE_DB``. None when unavailable — callers degrade to the
+    raw status counts rather than fabricating a delta.
+    """
+
+    raw = os.environ.get("RUNSTORE_DB")
+    if raw and Path(raw).exists():
+        return Path(raw)
+    return None
+
+
+def _proposal_outcomes() -> dict[int, dict[str, Any]]:
+    """Map iteration -> its parent-relative outcome from ``proposal_outcomes``.
+
+    Returns ``{iteration: {passrate_delta, regression_count, base_iteration}}``.
+    Empty when runstore is unavailable. This is the deterministic base-rate
+    source: the critic reads ``passrate_delta`` straight from here instead of
+    hand-computing it from per-task comparisons (which mis-picked the parent
+    in earlier runs).
+    """
+
+    path = _resolve_runstore_path()
+    if path is None:
+        return {}
+    out: dict[int, dict[str, Any]] = {}
+    try:
+        with sqlite3.connect(path) as conn:
+            for row in conn.execute(
+                "SELECT iteration, passrate_delta, regression_count, base_iteration "
+                "FROM proposal_outcomes"
+            ):
+                out[int(row[0])] = {
+                    "passrate_delta": row[1],
+                    "regression_count": row[2],
+                    "base_iteration": row[3],
+                }
+    except sqlite3.Error:
+        return {}
+    return out
+
+
 _DB_PATH = _resolve_db_path()
 _QUERY: TraceQuery | None = None
 
@@ -165,8 +209,12 @@ def trace_similar(diff_or_query: str, k: int = 5) -> list[dict[str, Any]]:
     ``diff_embeddings``. Subsequent calls reuse the cache; the only
     per-call work is embedding the query.
 
-    Returns rows of ``{iteration, similarity, model, status_counts}``
-    sorted by similarity descending.
+    Returns rows of ``{iteration, similarity, model, passrate_delta,
+    regressed, regression_count, status_counts}`` sorted by similarity
+    descending. ``passrate_delta`` / ``regressed`` come from the optimizer's
+    ``proposal_outcomes`` (parent-relative, deterministic) — use them directly
+    for the base rate; do NOT recompute deltas by comparing iterations
+    yourself. They are ``None`` only when runstore is unavailable.
     """
 
     if not diff_or_query.strip():
@@ -180,10 +228,13 @@ def trace_similar(diff_or_query: str, k: int = 5) -> list[dict[str, Any]]:
     query_emb = embedder.embed(diff_or_query)
     if query_emb is None:
         return []
+    outcomes = _proposal_outcomes()
     scored: list[tuple[float, dict[str, Any]]] = []
     for row in rows:
         sim = cosine_similarity(query_emb.vector, row["vector"])
         iteration = row["iteration"]
+        outcome = outcomes.get(iteration, {})
+        delta = outcome.get("passrate_delta")
         scored.append(
             (
                 sim,
@@ -191,6 +242,9 @@ def trace_similar(diff_or_query: str, k: int = 5) -> list[dict[str, Any]]:
                     "iteration": iteration,
                     "similarity": sim,
                     "model": model,
+                    "passrate_delta": delta,
+                    "regressed": (delta is not None and delta < 0),
+                    "regression_count": outcome.get("regression_count"),
                     "status_counts": _status_counts_for(_DB_PATH, iteration),
                 },
             )
