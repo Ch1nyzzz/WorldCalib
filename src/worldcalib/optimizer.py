@@ -1433,11 +1433,12 @@ class LocomoOptimizer:
         return compliant
 
     def _update_calibration_track_record(self) -> None:
-        """Refresh ``<run_dir>/calibration_track_record.md`` (critic variant only).
+        """Regenerate the critic variant's world model after an eval.
 
-        Reads the just-updated RunStore ledger plus the proposer's past
-        prediction.md files. Best-effort: a failure here must never break the
-        optimization loop.
+        Writes both ``calibration_track_record.md`` (the P(regress) scorecard)
+        and ``world_model.md`` (the cumulative WMC document the proposer reads
+        before proposing). Both are distilled deterministically from the
+        just-updated ledger; best-effort, never breaks the loop.
         """
 
         if self.config.proposer_variant != "critic":
@@ -1449,6 +1450,14 @@ class LocomoOptimizer:
         except Exception as exc:  # noqa: BLE001
             self._append_event(
                 {"event": "calibration_track_record_failed", "error": repr(exc)}
+            )
+        try:
+            from worldcalib.world_model_distiller import write_world_model
+
+            write_world_model(self.run_dir)
+        except Exception as exc:  # noqa: BLE001
+            self._append_event(
+                {"event": "world_model_distill_failed", "error": repr(exc)}
             )
 
     def _sync_calibration_into_workspace(
@@ -1465,11 +1474,14 @@ class LocomoOptimizer:
         """
 
         if self.config.proposer_variant == "critic":
-            # No prose calibration; stage the deterministic track record so the
-            # proposer can correct its own optimism (SKILL workflow step 0).
-            track = self.run_dir / "calibration_track_record.md"
-            if track.exists():
-                shutil.copy2(track, workspace_dir / "calibration_track_record.md")
+            # No prose calibration; stage the deterministically distilled
+            # world_model.md (proven stack / effective+failed mechanisms /
+            # calibration record / open problems) so the proposer reads it
+            # before proposing (SKILL workflow step 0).
+            for name in ("world_model.md", "calibration_track_record.md"):
+                src = self.run_dir / name
+                if src.exists():
+                    shutil.copy2(src, workspace_dir / name)
             return
 
         src = self.run_dir / "world_model_calibration.md"

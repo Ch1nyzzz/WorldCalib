@@ -195,16 +195,20 @@ no shadow gate, no hidden score.
       and target_base_url**. Use those values whenever you reason about target
       behavior — do NOT infer model family from `src/worldcalib/model.py`
       defaults (they are launcher-overridden).
-   b. If `./calibration_track_record.md` exists, read it: it is the optimizer's
-      mechanical scoring of your past `P(regress)` calls against real outcomes
-      (Brier score, directional bias). Note any systematic bias — e.g.
-      "under-calls regressions on retrieval-only changes" — and carry the
-      correction into this iter's prediction.
+   b. **`cat ./world_model.md` and use it to shape this iter's candidate.**
+      This is the cumulative world model, distilled deterministically from the
+      measured ledger after every eval (you do not write it). It tells you:
+      the **proven stack** to build on, **effective mechanisms** to extend,
+      **failure modes to avoid** (mechanisms that really regressed — do not
+      repeat them without fixing the cause), your **calibration record** (if it
+      says you under-call regressions, raise `P(regress)` accordingly), and the
+      **open problems** (persistently weak question types worth targeting).
+      Your FIRST candidate should already reflect all of this — that is the
+      point of reading it before proposing.
    c. Do **not** hand-distill anything and do **not** look for
-      `world_model_calibration.md` — this variant has none. Last iter's
-      prediction was already scored against the ledger automatically; the
-      lesson lives in the ledger (query it via the *Evidence interface*) and in
-      your track record, not in a prose file you append to.
+      `world_model_calibration.md` — this variant has none. The world model is
+      `./world_model.md` (read-only, optimizer-generated) plus the live ledger
+      via the *Evidence interface*; you never append prose to a belief file.
 1. **Analyze.** Read the available evidence (see *Evidence interface* below) and
    deep-read both failed *and* successful trajectories for recent iterations.
    Classify recurring failure modes — whether failures come from retrieval,
