@@ -1,11 +1,20 @@
 #!/usr/bin/env bash
-# WorldCalib launcher: LoCoMo, ledger + adversarial-critic proposer variant.
-# Same config as the longmemeval critic run (--proposer-variant critic, soft
-# gate, no --organized needed). 30 iters by default.
-#   CRITIC_ENFORCE=1 hardens the gate; ITERATIONS overrides the count.
+# Resume an existing critic-variant run to ITERATIONS total iters.
+# Reuses the run dir, baseline, and all proposer wiring; --resume picks up at
+# max(completed)+1. Same critic variant + soft gate as the pilot launcher.
+#
+# Usage:
+#   RUN_ID=<existing_run_id> ITERATIONS=30 bash scripts/launch_wmc_critic_resume.sh
 set -u -o pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+: "${RUN_ID:?set RUN_ID=<existing run id under runs/>}"
+RUN_DIR="runs/${RUN_ID}"
+if [ ! -f "${RUN_DIR}/runstore.db" ]; then
+  printf 'fatal: %s/runstore.db not found — nothing to resume.\n' "$RUN_DIR" >&2
+  exit 1
+fi
 
 if [ -f .env ]; then
   set -a
@@ -36,13 +45,15 @@ export ANTHROPIC_DEFAULT_SONNET_MODEL="${KIMI_MODEL}"
 export ANTHROPIC_DEFAULT_HAIKU_MODEL="${KIMI_MODEL}"
 export CLAUDE_CODE_SUBAGENT_MODEL="${KIMI_MODEL}"
 
-TS="${TS:-$(date +%Y%m%d_%H%M%S)}"
 ITERATIONS="${ITERATIONS:-30}"
+CLAUDE_EFFORT="${CLAUDE_EFFORT:-max}"
 EVAL_WORKERS="${EVAL_WORKERS:-64}"
 EVAL_TIMEOUT_S="${EVAL_TIMEOUT_S:-300}"
 TARGET_MODEL="${TARGET_MODEL:-deepseek-v4-flash}"
 TARGET_BASE_URL="${TARGET_BASE_URL:-https://api.deepseek.com}"
-BASELINE_LOCOMO_DIR="${BASELINE_LOCOMO_DIR:-runs/baseline_locomo_target_deepseek_v4_flash_20260526}"
+LME_JUDGE_MODEL="${LME_JUDGE_MODEL:-deepseek-v4-flash}"
+LME_JUDGE_BASE_URL="${LME_JUDGE_BASE_URL:-https://api.deepseek.com}"
+BASELINE_LME_DIR="${BASELINE_LME_DIR:-runs/baseline_longmemeval_s_target_deepseek_v4_flash_fixedjudge_20260526}"
 DOCKER_USER_SPEC="${DOCKER_USER_SPEC:-$(id -u):$(id -g)}"
 
 enforce_args=()
@@ -50,29 +61,24 @@ if [ "${CRITIC_ENFORCE:-0}" = "1" ]; then
   enforce_args=(--critic-gate-enforce)
 fi
 
-mkdir -p logs runs
-if [ ! -f "${BASELINE_LOCOMO_DIR}/run_summary.json" ]; then
-  printf 'fatal: baseline missing %s/run_summary.json\n' "$BASELINE_LOCOMO_DIR" >&2
-  exit 1
-fi
-
-run_id="locomo_claudekimi_k26_maxeffort_target_deepseek_v4_flash_critic_iter${ITERATIONS}_${TS}"
-log_path="logs/${run_id}.log"
-status_file="logs/launch_wmc_critic_locomo_${TS}.status"
-printf '[%s] START %s variant=critic enforce=%s iter=%s baseline=%s\n[%s] LOG %s\n' \
-  "$(date -Is)" "$run_id" "${CRITIC_ENFORCE:-0}" "$ITERATIONS" "$BASELINE_LOCOMO_DIR" "$(date -Is)" "$log_path" \
-  | tee "$status_file"
+TS="$(date +%Y%m%d_%H%M%S)"
+log_path="logs/${RUN_ID}_resume_to${ITERATIONS}_${TS}.log"
+printf 'resuming %s -> %s iters (enforce=%s)\nlog: %s\n' \
+  "$RUN_ID" "$ITERATIONS" "${CRITIC_ENFORCE:-0}" "$log_path"
 
 setsid worldcalib-optimize \
-  --locomo \
+  --longmemeval --longmemeval-variant s \
+  --longmemeval-judge-model "$LME_JUDGE_MODEL" \
+  --longmemeval-judge-base-url "$LME_JUDGE_BASE_URL" \
   --proposer-variant critic \
   --dry-run-probe-k "${DRY_RUN_PROBE_K:-3}" \
   "${enforce_args[@]}" \
+  --resume \
   --selection-policy default \
   --no-summary \
-  --run-id "$run_id" \
-  --out "runs/${run_id}" \
-  --baseline-dir "$BASELINE_LOCOMO_DIR" \
+  --run-id "$RUN_ID" \
+  --out "$RUN_DIR" \
+  --baseline-dir "$BASELINE_LME_DIR" \
   --iterations "$ITERATIONS" \
   --split train \
   --eval-workers "$EVAL_WORKERS" \
@@ -86,7 +92,7 @@ setsid worldcalib-optimize \
   --claude-base-url "$KIMI_BASE_URL" \
   --claude-auth-token "$KIMI_API_KEY" \
   --claude-model "$KIMI_MODEL" \
-  --claude-effort max \
+  --claude-effort "$CLAUDE_EFFORT" \
   --proposer-sandbox docker \
   --proposer-docker-image docker-claude-kimi:latest \
   --proposer-docker-user "$DOCKER_USER_SPEC" \
@@ -100,6 +106,5 @@ setsid worldcalib-optimize \
   > "$log_path" 2>&1 < /dev/null &
 
 pid=$!
-printf '[%s] PID %s %s\n' "$(date -Is)" "$run_id" "$pid" | tee -a "$status_file"
-echo "$pid" > "logs/${run_id}.pid"
-printf 'started pid=%s run_id=%s\nlog: %s\n' "$pid" "$run_id" "$log_path"
+printf 'resumed pid=%s\n' "$pid"
+echo "$pid" > "logs/${RUN_ID}_resume.pid"

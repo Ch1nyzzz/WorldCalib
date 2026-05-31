@@ -207,6 +207,16 @@ def _add_common_optimize_args(parser: argparse.ArgumentParser) -> None:
             "is logged but the candidate is still evaluated."
         ),
     )
+    parser.add_argument(
+        "--dry-run-probe-k",
+        type=int,
+        default=0,
+        help=(
+            "Before the full eval, smoke-run each candidate on this many probe "
+            "tasks; if it produces zero model output on all of them (a runtime "
+            "crash), skip it instead of burning a full eval. 0 disables (default)."
+        ),
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -304,6 +314,7 @@ def main(argv: list[str] | None = None) -> int:
         proposer_docker_mount=tuple(args.proposer_docker_mount),
         proposer_variant=args.proposer_variant,
         critic_gate_enforce=args.critic_gate_enforce,
+        dry_run_probe_k=args.dry_run_probe_k,
     )
 
     if args.task == "longmemeval":

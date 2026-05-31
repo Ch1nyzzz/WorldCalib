@@ -103,6 +103,7 @@ setsid worldcalib-optimize \
   --longmemeval-judge-model "$LME_JUDGE_MODEL" \
   --longmemeval-judge-base-url "$LME_JUDGE_BASE_URL" \
   --proposer-variant critic \
+  --dry-run-probe-k "${DRY_RUN_PROBE_K:-3}" \
   "${enforce_args[@]}" \
   --selection-policy default \
   --no-summary \

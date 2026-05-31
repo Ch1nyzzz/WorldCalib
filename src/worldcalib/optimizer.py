@@ -153,6 +153,12 @@ class OptimizerConfig:
     # but the candidate is still evaluated — use the soft mode until a pilot
     # confirms the critic flow runs end-to-end, then enforce.
     critic_gate_enforce: bool = False
+    # Before the full eval, run the candidate on this many probe tasks; if it
+    # produces zero model output on all of them (a runtime crash like the
+    # KeyError that wiped iter_29), skip it instead of burning a full eval.
+    # 0 disables the probe (default, so the prose/no-wmc baselines are
+    # unaffected); the critic launcher sets it to ~3.
+    dry_run_probe_k: int = 0
 
 
 class LocomoOptimizer:
@@ -2233,6 +2239,23 @@ class LocomoOptimizer:
             )
             candidate_name = str(raw.get("name") or scaffold.name)
             candidate_id = f"iter{iteration:03d}_{candidate_name}_top{top_k}"
+            crash = self._dry_run_probe(
+                scaffold=scaffold,
+                scaffold_name=candidate_name,
+                config=config,
+                candidate_id=candidate_id,
+                examples=examples,
+            )
+            if crash:
+                self._append_event(
+                    {
+                        "iteration": iteration,
+                        "event": "candidate_dry_run_rejected",
+                        "candidate_id": candidate_id,
+                        "reason": crash,
+                    }
+                )
+                continue
             try:
                 result = runner.evaluate_scaffold(
                     scaffold=scaffold,
@@ -2254,6 +2277,60 @@ class LocomoOptimizer:
             results.append(result)
             self._append_summary(iteration=iteration, candidate=result, proposal=raw)
         return results
+
+    def _dry_run_probe(
+        self,
+        *,
+        scaffold: Any,
+        scaffold_name: str,
+        config: Any,
+        candidate_id: str,
+        examples: list[LocomoExample],
+    ) -> str | None:
+        """Smoke-run the candidate on a few tasks before the full eval.
+
+        Returns a crash reason string if the candidate is a runtime crash
+        (raised while building/answering, or produced zero model output on
+        every probe task — the signature of the iter_29 ``KeyError``), else
+        None. Best-effort: a probe-infrastructure error does NOT reject the
+        candidate (the full eval's own guard still applies); only a clear
+        no-output / raised-exception signal does.
+        """
+
+        k = max(0, int(self.config.dry_run_probe_k))
+        if k == 0 or not examples:
+            return None
+        import tempfile
+
+        probe_examples = examples[:k]
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                probe = EvaluationRunner(
+                    examples=probe_examples,
+                    out_dir=Path(tmp),
+                    model=self.config.model,
+                    base_url=self.config.base_url,
+                    api_key=self.config.api_key,
+                    timeout_s=self.config.eval_timeout_s,
+                    dry_run=self.config.dry_run,
+                    max_context_chars=self.config.max_context_chars,
+                    max_eval_workers=min(k, self.config.max_eval_workers),
+                    force=True,
+                )
+                res = probe.evaluate_scaffold(
+                    scaffold=scaffold,
+                    scaffold_name=scaffold_name,
+                    config=config,
+                    candidate_id=candidate_id,
+                )
+        except Exception as exc:  # noqa: BLE001 — a raised eval IS the crash signal
+            return f"scaffold raised during dry-run: {type(exc).__name__}: {exc}"
+        if res.count > 0 and res.avg_completion_tokens == 0:
+            return (
+                "dry-run produced zero model output on all "
+                f"{res.count} probe tasks (likely runtime crash)"
+            )
+        return None
 
     def _make_evaluation_runner(
         self,
