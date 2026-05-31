@@ -249,13 +249,17 @@ no shadow gate, no hidden score.
    ledger, that this candidate will regress. Hand it your candidate one-liner,
    mechanism, and the actual diff. Instruct the subagent to:
    a. call `trace_similar(<the diff or a faithful description>, k=8)`;
-   b. for the nearest neighbours, look up their real outcomes via the RunStore
-      tools (`runstore_fact_candidate_outcome` / `trace_compare_iterations` /
-      iteration metadata) — specifically `passrate_delta` and
-      `regression_count`;
-   c. compute the **base rate** ("of the N nearest, X regressed, Y flat,
-      Z advanced") and name the **dominant failure mode of the regressed
-      neighbours**;
+   b. read each neighbour's `passrate_delta` and `regressed` **directly from
+      the `trace_similar` result** — these are the optimizer's authoritative,
+      parent-relative numbers. Do **NOT** recompute deltas by comparing
+      iterations yourself (e.g. comparing every neighbour to the current best);
+      that mis-picks the parent and corrupts the base rate. Use
+      `trace_candidate_outcome` only to inspect *how* a regressed neighbour
+      failed (its per-task examples), never to re-derive its delta.
+   c. compute the **base rate** straight from the `regressed` flags:
+      "of the N nearest, X regressed (regressed=true), Y flat, Z advanced →
+      P(regress|class) = X/N"; then name the **dominant failure mode of the
+      regressed neighbours** (from their `trace_candidate_outcome`);
    d. write `./critique.md` with exactly this shape and return its strongest
       single challenge:
 
