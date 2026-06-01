@@ -85,6 +85,13 @@ class OptimizerConfig:
     codex_reasoning_effort: str = "high"
     codex_home: str = ""
     propose_timeout_s: int = 2400
+    # Grace window (seconds) after a docker proposer overruns
+    # ``propose_timeout_s``: we poll for the workspace ``pending_eval.json`` to
+    # finish flushing before ``docker kill``-ing the orphaned container. Short
+    # by design — it only wins the boundary race where a candidate lands at the
+    # wire; overrun candidates that land many minutes late are unsalvageable
+    # without defeating the timeout.
+    propose_salvage_grace_s: int = 60
     dry_run: bool = False
     max_context_chars: int = 6000
     max_eval_workers: int = 1
@@ -2005,12 +2012,17 @@ class LocomoOptimizer:
         cwd: Path | None = None,
     ) -> Any:
         agent = self.config.proposer_agent.strip().lower()
+        proposer_cwd = cwd or self.project_root
         kwargs: dict[str, Any] = dict(
-            cwd=cwd or self.project_root,
+            cwd=proposer_cwd,
             log_dir=log_dir,
             name=name,
             timeout_s=self.config.propose_timeout_s,
             sandbox=self._proposer_sandbox_config(),
+            # On a docker timeout, kill the orphaned container instead of
+            # leaking it; give the in-flight candidate a short grace to land.
+            salvage_ready_path=proposer_cwd / "pending_eval.json",
+            salvage_grace_s=self.config.propose_salvage_grace_s,
             model=self.config.claude_model,
             effort=self.config.claude_effort,
             claude_base_url=self.config.claude_base_url,
