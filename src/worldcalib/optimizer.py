@@ -1429,13 +1429,26 @@ class LocomoOptimizer:
 
         if self.config.proposer_variant != "critic":
             return True
-        from worldcalib.calibration_track_record import parse_prediction_signals
+        from worldcalib.calibration_track_record import (
+            parse_critique_signals,
+            parse_prediction_signals,
+        )
 
         crit = workspace_dir / "critique.md"
         pred = workspace_dir / "prediction.md"
         crit_text = crit.read_text(encoding="utf-8") if crit.exists() else ""
         pred_text = pred.read_text(encoding="utf-8") if pred.exists() else ""
         p_regress, _ = parse_prediction_signals(pred_text)
+        base_rate, verdict = parse_critique_signals(crit_text)
+        # Optimism discount: the proposer stated a P(regress) below the critic's
+        # reference-class base rate (iter23 did 0.30 vs a 0.375 base rate, then
+        # regressed -0.29). A tiny tolerance absorbs rounding.
+        optimism_discount = (
+            p_regress is not None
+            and base_rate is not None
+            and p_regress < base_rate - 1e-6
+        )
+        verdict_revise = verdict == "revise"
         checks = {
             "critique_present": bool(crit_text.strip()),
             "has_reference_class": "reference class" in crit_text.lower(),
@@ -1443,11 +1456,17 @@ class LocomoOptimizer:
             "prediction_present": bool(pred_text.strip()),
             "p_regress_present": p_regress is not None,
             "p_regress": p_regress,
+            "base_rate": base_rate,
+            "verdict": verdict,
+            "optimism_discount": optimism_discount,
+            "verdict_revise": verdict_revise,
         }
         compliant = bool(
             checks["critique_present"]
             and checks["has_base_rate"]
             and checks["p_regress_present"]
+            and not optimism_discount
+            and not verdict_revise
         )
         self._append_event(
             {

@@ -57,7 +57,7 @@ BASELINE_LME_DIR="${BASELINE_LME_DIR:-runs/baseline_longmemeval_s_target_deepsee
 DOCKER_USER_SPEC="${DOCKER_USER_SPEC:-$(id -u):$(id -g)}"
 
 enforce_args=()
-if [ "${CRITIC_ENFORCE:-0}" = "1" ]; then
+if [ "${CRITIC_ENFORCE:-1}" = "1" ]; then
   enforce_args=(--critic-gate-enforce)
 fi
 

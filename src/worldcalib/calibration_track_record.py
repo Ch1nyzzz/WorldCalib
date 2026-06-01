@@ -40,6 +40,18 @@ _P_REGRESS_RE = re.compile(r"P\s*\(\s*regress\s*\)\s*:?\s*([01]?\.\d+|[01](?:\.0
 _DELTA_LINE_RE = re.compile(r"passrate\s*Δ\s*:\s*\[([^\]]+)\]", re.IGNORECASE)
 _DECIMAL_RE = re.compile(r"[+-]?\d*\.\d+")
 
+# critique.md base rate: "→ P(regress|class) ≈ 0.30" (explicit decimal) or the
+# "of N nearest: X regressed" tally it is computed from.
+_BASE_RATE_RE = re.compile(
+    r"P\s*\(\s*regress\s*\|\s*class\s*\)\s*[≈=:]+\s*([01]?\.\d+|[01](?:\.0+)?)",
+    re.IGNORECASE,
+)
+_BASE_RATE_TALLY_RE = re.compile(
+    r"of\s+(\d+)\s+nearest\s*:?\s*(\d+)\s+regressed", re.IGNORECASE
+)
+# critique.md verdict line: "## Verdict\n revise | proceed-with-justification"
+_VERDICT_RE = re.compile(r"##\s*Verdict\s*\n+\s*([^\n]+)", re.IGNORECASE)
+
 
 @dataclass(frozen=True)
 class IterRecord:
@@ -83,6 +95,44 @@ def parse_prediction_signals(text: str) -> tuple[float | None, float | None]:
         if len(nums) >= 2:
             delta_hi = float(nums[1])
     return p_regress, delta_hi
+
+
+def parse_critique_signals(text: str) -> tuple[float | None, str | None]:
+    """Return ``(base_rate, verdict)`` parsed from a critique.md.
+
+    ``base_rate`` is the critic's reference-class P(regress|class): the explicit
+    decimal if present, else computed from the ``of N nearest: X regressed``
+    tally. ``verdict`` is normalized to ``"revise"`` or ``"proceed"`` (or None
+    if absent). These feed the enforced critic gate: a candidate whose stated
+    ``P(regress)`` undercuts ``base_rate`` (optimism discount) or whose verdict
+    is ``revise`` is rejected when ``critic_gate_enforce`` is on.
+    """
+    base_rate: float | None = None
+    m = _BASE_RATE_RE.search(text)
+    if m:
+        try:
+            base_rate = float(m.group(1))
+        except ValueError:
+            base_rate = None
+    if base_rate is None:
+        tm = _BASE_RATE_TALLY_RE.search(text)
+        if tm:
+            n_total = int(tm.group(1))
+            n_regressed = int(tm.group(2))
+            if n_total > 0:
+                base_rate = n_regressed / n_total
+
+    verdict: str | None = None
+    vm = _VERDICT_RE.search(text)
+    if vm:
+        line = vm.group(1).lower()
+        # "proceed-with-justification" contains neither bare token ambiguity;
+        # check revise first since some lines read "revise (not proceed)".
+        if "revise" in line:
+            verdict = "revise"
+        elif "proceed" in line:
+            verdict = "proceed"
+    return base_rate, verdict
 
 
 def _prediction_path(run_dir: Path, iteration: int) -> Path:
