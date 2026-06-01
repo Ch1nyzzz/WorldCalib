@@ -198,7 +198,7 @@ def render_world_model(run_dir: Path) -> str:
     weak = _weak_question_types(run_dir, best["result_path"] if best else None)
     open_probs = [(q, p) for q, p in weak if p <= WEAK_QTYPE_PASSRATE]
     lines += [
-        "## Open problems (persistently weak question types — high-value targets)",
+        "## Open problems (persistently weak question types — diagnose, do NOT special-case)",
         "",
     ]
     if open_probs:
@@ -206,8 +206,16 @@ def render_world_model(run_dir: Path) -> str:
             lines.append(f"- `{q}`: {p:.2f} in the best candidate")
         lines.append("")
         lines.append(
-            "No candidate has cracked these. A mechanism that lifts one of them "
-            "is worth more than another small gain on already-strong types."
+            "These are weak because of a **general** information-flow gap (retrieval "
+            "coverage, evidence ordering, context budget, conflict handling) — treat "
+            "them as a diagnostic signal, not a to-do list. Do NOT build a "
+            "question-type-specific rule, detector, or branch to attack them: "
+            "per-type special-casing (temporal/numerical/answer-type handlers, "
+            "month-name enrichment, inference pre-computation) is overfitting and "
+            "has repeatedly regressed here. Fix the underlying general mechanism so "
+            "the whole frontier moves; if the weak type does not improve as a side "
+            "effect of a stronger general mechanism, that is informative, not a cue "
+            "to special-case it."
         )
     else:
         lines.append("- (best candidate is reasonably balanced across question types)")

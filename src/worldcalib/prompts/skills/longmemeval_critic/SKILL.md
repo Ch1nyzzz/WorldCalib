@@ -237,12 +237,16 @@ no shadow gate, no hidden score.
 
    `P(regress)` is the load-bearing field. Seed it from the reference-class
    base rate — call `trace_similar` on your planned change and read how many of
-   the nearest neighbours regressed — then adjust, and state the adjustment.
-   Do not default to optimism: if the base rate says half of similar changes
-   regressed, a `P(regress)` near 0 needs an explicit, falsifiable reason. The
-   `Train passrate Δ` interval must be consistent with `P(regress)` (you cannot
-   claim a tight positive Δ while also claiming a high regression probability).
-   This file is provisional until the critic (step 5) has challenged it.
+   the nearest neighbours regressed — then adjust **upward only**, and state
+   the adjustment. You may raise `P(regress)` above the base rate for extra
+   risk; you may **never** set it below the critic's base rate — a lower number
+   is an optimism discount and the optimizer's enforced gate rejects the
+   candidate. Do not default to optimism: if the base rate says half of similar
+   changes regressed, a `P(regress)` near 0 needs an explicit, falsifiable
+   reason. The `Train passrate Δ` interval must be consistent with `P(regress)`
+   (you cannot claim a tight positive Δ while also claiming a high regression
+   probability). This file is provisional until the critic (step 5) has
+   challenged it.
 
 4. **Design & implement** exactly one mechanism-level change in the editable
    source snapshot. One candidate tests one hypothesis — if you are tempted to
@@ -263,7 +267,15 @@ no shadow gate, no hidden score.
    c. compute the **base rate** straight from the `regressed` flags:
       "of the N nearest, X regressed (regressed=true), Y flat, Z advanced →
       P(regress|class) = X/N"; then name the **dominant failure mode of the
-      regressed neighbours** (from their `trace_candidate_outcome`);
+      regressed neighbours** (from their `trace_candidate_outcome`).
+      **Do not let a low raw base rate lull you.** The k semantic neighbours are
+      a biased sample — a change can match a *known* failure family even when
+      its nearest neighbours happen not to have regressed. If your Challenge
+      cites ANY past regression as a precedent for this candidate's risk, the
+      base rate you report MUST be raised to at least that failure family's
+      historical regression rate, not the raw X/N of the neighbour sample. A
+      base rate that contradicts your own Challenge is a bug — fix the base
+      rate, do not soften the Challenge.
    d. write `./critique.md` with exactly this shape and return its strongest
       single challenge:
 
@@ -282,12 +294,36 @@ no shadow gate, no hidden score.
       <revise | proceed-with-justification>
       ```
 
+   **Verdict is not a formality — default to `revise`.** The verdict MUST be
+   `revise` (not `proceed-with-justification`) whenever ANY of these hold:
+     - the Challenge cites a past regression as a same-family precedent (you
+       just argued it will regress — say `revise`);
+     - the candidate adds a **question-type-specific** rule, detector, branch,
+       or handler (temporal / numerical / answer-type / month-name / "detect
+       question kind then…" / synthetic-fact or inference pre-computation).
+       Per-type special-casing is overfitting and is the single most common
+       regression cause in this ledger — it is `revise` on sight, regardless of
+       how "surgical" or "appended-not-prepended" the proposer claims it is;
+     - the change reorders or rewrites the evidence the model sees for a subset
+       of questions.
+   Only give `proceed-with-justification` when the candidate is a *general*
+   information-flow mechanism (retrieval coverage, ranking, dedup, context
+   budget, conflict handling) with no per-question-type branching AND no cited
+   regression precedent.
+
    Then **you must respond** to the challenge: either **revise** the candidate
    to defuse it (return to step 4 and re-run this review — at most 2 critic
    rounds), or keep it and add a `## Critic response` section to
    `./prediction.md` giving a falsifiable reason the dominant failure mode does
-   not apply, AND reconcile your `P(regress)` with the critic's base rate. A
-   candidate may not proceed if its only answer to the challenge is optimism.
+   not apply, AND reconcile your `P(regress)` with the critic's base rate.
+   **A verbal "mine is more surgical / category-gated / appended" is NOT a
+   defusal** — only a structural change to the diff that removes the failure
+   mechanism counts. **Your `P(regress)` must be ≥ the critic's base rate**;
+   stating a lower number is an optimism discount and the optimizer's enforced
+   gate will reject the candidate. If the critic returned `revise`, the
+   enforced gate rejects the candidate unless you actually revised the diff and
+   re-ran the critic to a `proceed` verdict — so revise the code, do not
+   argue.
 6. **Smoke check.** Run a lightweight syntax/import check on the edited snapshot.
 7. **Write `pending_eval.json`** with exactly one candidate.
 
