@@ -906,18 +906,39 @@ class LocomoOptimizer:
                 }
             )
             proposed = proposed[:1]
-        critic_compliant = self._check_critic_compliance(
+        critic_compliant, critic_checks = self._check_critic_compliance(
             iteration, workspace_dir, policy_name
         )
         if not critic_compliant and self.config.critic_gate_enforce:
+            if critic_checks.get("optimism_discount"):
+                reject_reason = "optimism_discount"
+            elif critic_checks.get("verdict_revise"):
+                reject_reason = "verdict_revise"
+            else:
+                reject_reason = "missing_critic_artifacts"
+            rejected_candidate = proposed[0] if proposed else {}
+            descriptor = {
+                key: rejected_candidate.get(key)
+                for key in ("name", "build_tag", "scaffold_name", "hypothesis")
+                if isinstance(rejected_candidate, dict)
+                and rejected_candidate.get(key)
+            }
             self._append_event(
                 {
                     "iteration": iteration,
                     "event": "critic_gate_rejected",
                     "selection_policy": policy_name,
                     "budget": budget,
+                    "reject_reason": reject_reason,
+                    "verdict": critic_checks.get("verdict"),
+                    "base_rate": critic_checks.get("base_rate"),
+                    "p_regress": critic_checks.get("p_regress"),
+                    "candidate": descriptor,
                 }
             )
+            # Fold the veto into the world model NOW so the very next proposer
+            # sees it (a rejected iter never reaches the post-eval distill).
+            self._update_calibration_track_record()
             return []
         for raw in proposed:
             if isinstance(raw, dict):
@@ -1424,18 +1445,20 @@ class LocomoOptimizer:
 
     def _check_critic_compliance(
         self, iteration: int, workspace_dir: Path, policy_name: str
-    ) -> bool:
+    ) -> tuple[bool, dict[str, Any]]:
         """Check & log whether the critic variant produced its mandated
         artifacts (``critique.md`` with a base rate, ``prediction.md`` with a
         ``P(regress)``). Always logs a ``critic_compliance`` event; returns
-        whether the candidate is compliant. Enforcement (rejection) is the
-        caller's job, gated on ``critic_gate_enforce``.
+        ``(compliant, checks)`` where ``checks`` carries the signals the caller
+        folds into a ``critic_gate_rejected`` event (verdict, base_rate,
+        p_regress, optimism_discount, verdict_revise). Enforcement (rejection)
+        is the caller's job, gated on ``critic_gate_enforce``.
 
-        No-op (returns True) for the prose variant.
+        No-op (returns ``(True, {})``) for the prose variant.
         """
 
         if self.config.proposer_variant != "critic":
-            return True
+            return True, {}
         from worldcalib.calibration_track_record import (
             parse_critique_signals,
             parse_prediction_signals,
@@ -1485,7 +1508,7 @@ class LocomoOptimizer:
                 **checks,
             }
         )
-        return compliant
+        return compliant, checks
 
     def _update_calibration_track_record(self) -> None:
         """Regenerate the critic variant's world model after an eval.

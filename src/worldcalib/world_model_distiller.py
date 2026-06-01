@@ -104,6 +104,50 @@ def _weak_question_types(run_dir: Path, best_result_path: str | None) -> list[tu
     return out
 
 
+def _vetoed_directions(run_dir: Path, limit: int = 8) -> list[dict]:
+    """Candidates the critic gate rejected pre-eval, most recent first.
+
+    These never reach the ledger (the loop discards a rejected iter before
+    ``record_eval``), so without this they would be invisible to the next
+    proposer — which could then re-propose the same vetoed direction. Read
+    straight from the event log; deduped by candidate name/build_tag keeping
+    the latest rejection.
+    """
+    summary = run_dir / "evolution_summary.jsonl"
+    if not summary.is_file():
+        return []
+    seen: dict[str, dict] = {}
+    for line in summary.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or '"critic_gate_rejected"' not in line:
+            continue
+        try:
+            d = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if d.get("event") != "critic_gate_rejected":
+            continue
+        cand = d.get("candidate") or {}
+        label = cand.get("name") or cand.get("build_tag") or cand.get("scaffold_name")
+        if not label:
+            label = f"iter{d.get('iteration')}"
+        seen[str(label)] = {
+            "iteration": d.get("iteration"),
+            "label": label,
+            "reason": d.get("reject_reason"),
+            "verdict": d.get("verdict"),
+            "base_rate": d.get("base_rate"),
+            "p_regress": d.get("p_regress"),
+            "hypothesis": cand.get("hypothesis"),
+        }
+    rows = sorted(
+        seen.values(),
+        key=lambda r: (r["iteration"] is None, r["iteration"]),
+        reverse=True,
+    )
+    return rows[:limit]
+
+
 def render_world_model(run_dir: Path) -> str:
     rows = _ledger_rows(run_dir / "runstore.db")
     lines: list[str] = [
@@ -166,6 +210,31 @@ def render_world_model(run_dir: Path) -> str:
     else:
         lines.append("- (none yet)")
     lines.append("")
+
+    # Vetoed directions (critic gate rejected pre-eval — never hit the ledger)
+    vetoed = _vetoed_directions(run_dir)
+    if vetoed:
+        lines += [
+            "## Vetoed directions (critic gate rejected — do NOT re-propose)",
+            "",
+            "These candidates were blocked by the critic gate *before* eval, so "
+            "they carry no passrate. Do not re-propose the same direction unless "
+            "you directly resolve the critic's objection (raise `P(regress)` to "
+            "at least the cited base rate, or address what made the verdict "
+            "`revise`).",
+            "",
+        ]
+        for r in vetoed:
+            reason = r["reason"] or "rejected"
+            detail = ""
+            if reason == "optimism_discount" and r["p_regress"] is not None and r["base_rate"] is not None:
+                detail = f" (P(regress) {r['p_regress']:.2f} < base rate {r['base_rate']:.2f})"
+            elif reason == "verdict_revise":
+                detail = " (critic verdict: revise)"
+            hyp = r["hypothesis"]
+            hyp_str = f" — {hyp[:140]}" if isinstance(hyp, str) and hyp.strip() else ""
+            lines.append(f"- `{r['label']}` [{reason}{detail}]{hyp_str}")
+        lines.append("")
 
     # Calibration record (prediction scored against the ledger)
     s = summarize(collect_records(run_dir))
