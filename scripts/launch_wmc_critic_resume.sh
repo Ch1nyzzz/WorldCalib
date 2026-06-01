@@ -49,6 +49,7 @@ ITERATIONS="${ITERATIONS:-30}"
 CLAUDE_EFFORT="${CLAUDE_EFFORT:-max}"
 EVAL_WORKERS="${EVAL_WORKERS:-64}"
 EVAL_TIMEOUT_S="${EVAL_TIMEOUT_S:-300}"
+PROPOSE_TIMEOUT_S="${PROPOSE_TIMEOUT_S:-5400}"
 TARGET_MODEL="${TARGET_MODEL:-deepseek-v4-flash}"
 TARGET_BASE_URL="${TARGET_BASE_URL:-https://api.deepseek.com}"
 LME_JUDGE_MODEL="${LME_JUDGE_MODEL:-deepseek-v4-flash}"
@@ -83,6 +84,7 @@ setsid worldcalib-optimize \
   --split train \
   --eval-workers "$EVAL_WORKERS" \
   --eval-timeout-s "$EVAL_TIMEOUT_S" \
+  --propose-timeout-s "$PROPOSE_TIMEOUT_S" \
   --model "$TARGET_MODEL" \
   --base-url "$TARGET_BASE_URL" \
   --api-key EMPTY \

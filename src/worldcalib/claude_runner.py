@@ -16,6 +16,7 @@ import shlex
 import shutil
 import subprocess
 import time
+import uuid
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -93,6 +94,12 @@ class _PreparedAgentCommand:
     run_cwd: Path
     extract_cwd: Path
     error: str = ""
+    # For the docker sandbox path: the ``--name`` assigned to the
+    # ``docker run`` container. ``subprocess.run(timeout=...)`` only kills the
+    # local ``docker run`` *client* on timeout — the detached ``--rm``
+    # container keeps running (orphaned, still burning the proposer API), so
+    # we need a stable handle to ``docker kill`` it. Empty for non-docker runs.
+    container_name: str = ""
 
 
 def has_claude_cli() -> bool:
@@ -145,11 +152,16 @@ def _prepare_agent_command(
         )
 
     workspace = str(sandbox.docker_workspace or "/workspace")
+    # A stable container name so the caller can ``docker kill`` the detached
+    # container on timeout (see ``_PreparedAgentCommand.container_name``).
+    container_name = f"wc-proposer-{uuid.uuid4().hex[:16]}"
     docker_parts: list[str] = [
         "docker",
         "run",
         "--rm",
         "-i",
+        "--name",
+        container_name,
         "-v",
         f"{cwd.resolve(strict=False)}:{workspace}:rw",
         "-w",
@@ -175,6 +187,7 @@ def _prepare_agent_command(
         command=tuple(docker_parts),
         run_cwd=cwd,
         extract_cwd=Path(workspace),
+        container_name=container_name,
     )
 
 
@@ -202,6 +215,57 @@ def _normalize_docker_mount(spec: str) -> str:
     return f"{host}:{rest}"
 
 
+def _docker_kill_container(container_name: str) -> str:
+    """Best-effort ``docker kill`` of a named proposer container.
+
+    ``subprocess.run(timeout=...)`` only kills the local ``docker run`` client
+    when the proposer overruns ``propose_timeout_s``; the detached ``--rm``
+    container keeps running for minutes-to-hours (we measured 18 min – 4 h),
+    orphaned and still consuming the proposer API. Killing it by name stops
+    that waste. Returns a short status string for the timeout log; never raises.
+    """
+    if not container_name or shutil.which("docker") is None:
+        return "skipped (no container name / docker CLI)"
+    try:
+        completed = subprocess.run(
+            ("docker", "kill", container_name),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        return f"docker kill {container_name}: timed out after 30s"
+    except OSError as exc:  # pragma: no cover - docker CLI vanished mid-run
+        return f"docker kill {container_name}: {exc}"
+    if completed.returncode == 0:
+        return f"docker kill {container_name}: ok"
+    # rc!=0 is usually "No such container" — the container already exited
+    # cleanly (e.g. the proposer finished writing pending right at the wire).
+    stderr = (completed.stderr or "").strip().splitlines()
+    detail = stderr[-1] if stderr else f"rc={completed.returncode}"
+    return f"docker kill {container_name}: {detail}"
+
+
+def _wait_for_salvage_file(path: Path, *, grace_s: float) -> bool:
+    """Poll briefly for ``path`` to appear before killing the container.
+
+    Only meant to win the boundary race where the proposer is flushing
+    ``pending_eval.json`` at the instant the timeout fires (we observed one
+    such candidate land ~4 s before archive). It is deliberately short — the
+    bulk of overrun candidates land 18 min – 4 h late and are not salvageable
+    without defeating the timeout. Returns True if the file exists.
+    """
+    if grace_s <= 0:
+        return path.exists()
+    deadline = time.time() + grace_s
+    while True:
+        if path.exists():
+            return True
+        if time.time() >= deadline:
+            return False
+        time.sleep(2.0)
+
+
 def run_code_agent_prompt(
     prompt: str,
     *,
@@ -217,6 +281,8 @@ def run_code_agent_prompt(
     claude_auth_token: str | None = None,
     claude_append_system_prompt: str | None = None,
     claude_native_auth: bool = False,
+    salvage_ready_path: Path | None = None,
+    salvage_grace_s: int = 0,
     codex_model: str = "",
     codex_reasoning_effort: str = "",
     codex_home: str | None = None,
@@ -254,6 +320,8 @@ def run_code_agent_prompt(
             auth_token=claude_auth_token,
             append_system_prompt=claude_append_system_prompt,
             native_auth=claude_native_auth,
+            salvage_ready_path=salvage_ready_path,
+            salvage_grace_s=salvage_grace_s,
         )
     if normalized == "codex":
         from worldcalib.codex_runner import (
@@ -293,6 +361,8 @@ def run_claude_prompt(
     auth_token: str | None = None,
     append_system_prompt: str | None = None,
     native_auth: bool = False,
+    salvage_ready_path: Path | None = None,
+    salvage_grace_s: int = 0,
 ) -> ClaudeResult:
     """Run ``claude -p`` non-interactively and persist logs.
 
@@ -398,15 +468,40 @@ def run_claude_prompt(
             rate_limit_resets_at=rate_limit_resets_at,
         )
     except subprocess.TimeoutExpired as exc:
+        # ``subprocess.run`` has already killed the ``docker run`` client, but
+        # the detached ``--rm`` container is still alive. Give a short grace
+        # window for an in-flight ``pending_eval.json`` flush to complete, then
+        # kill the container so it stops consuming the proposer API.
+        kill_status = ""
+        if prepared.container_name:
+            if salvage_ready_path is not None and salvage_grace_s > 0:
+                landed = _wait_for_salvage_file(
+                    salvage_ready_path, grace_s=float(salvage_grace_s)
+                )
+                kill_status = (
+                    f"salvage_file={'present' if landed else 'absent'} "
+                    f"after {salvage_grace_s}s grace; "
+                )
+            kill_status += _docker_kill_container(prepared.container_name)
         raw_stdout = _coerce(exc.stdout)
         tool_access = _extract_claude_tool_access(raw_stdout, cwd=prepared.extract_cwd)
         duration_s = time.time() - started
         rate_limited, rate_limit_resets_at = _extract_rate_limit(raw_stdout)
+        if kill_status:
+            print(
+                f"[claude_runner] proposer timeout after {duration_s:.0f}s; "
+                f"{kill_status}",
+                flush=True,
+            )
+        timeout_stderr = _coerce(exc.stderr)
+        if kill_status:
+            note = f"[timeout {duration_s:.0f}s] {kill_status}"
+            timeout_stderr = f"{timeout_stderr}\n{note}".strip() if timeout_stderr else note
         result = ClaudeResult(
             returncode=None,
             timed_out=True,
             stdout=raw_stdout,
-            stderr=_coerce(exc.stderr),
+            stderr=timeout_stderr,
             raw_stdout=raw_stdout,
             command=prepared.command,
             usage=None,

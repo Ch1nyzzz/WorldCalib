@@ -127,6 +127,16 @@ def _add_common_optimize_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--claude-auth-token", default=None)
     parser.add_argument("--claude-native-auth", action="store_true")
     parser.add_argument("--propose-timeout-s", type=int, default=2400)
+    parser.add_argument(
+        "--propose-salvage-grace-s",
+        type=int,
+        default=60,
+        help=(
+            "Grace window (s) after a docker proposer overruns "
+            "--propose-timeout-s: poll for pending_eval.json to finish "
+            "flushing, then docker kill the orphaned container."
+        ),
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--max-context-chars", type=int, default=6000)
     parser.add_argument("--eval-workers", type=int, default=64)
@@ -296,6 +306,7 @@ def main(argv: list[str] | None = None) -> int:
         claude_auth_token=args.claude_auth_token,
         claude_native_auth=args.claude_native_auth,
         propose_timeout_s=args.propose_timeout_s,
+        propose_salvage_grace_s=args.propose_salvage_grace_s,
         dry_run=args.dry_run,
         max_context_chars=args.max_context_chars,
         max_eval_workers=args.eval_workers,
