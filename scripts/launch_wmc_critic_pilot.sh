@@ -57,9 +57,9 @@ LME_JUDGE_BASE_URL="${LME_JUDGE_BASE_URL:-https://api.deepseek.com}"
 BASELINE_LME_DIR="${BASELINE_LME_DIR:-runs/baseline_longmemeval_s_target_deepseek_v4_flash_fixedjudge_20260526}"
 DOCKER_USER_SPEC="${DOCKER_USER_SPEC:-$(id -u):$(id -g)}"
 
-# Soft gate by default; CRITIC_ENFORCE=1 hardens it.
+# Hard gate by default (critic veto + no-optimism-discount); CRITIC_ENFORCE=0 softens it.
 enforce_args=()
-if [ "${CRITIC_ENFORCE:-0}" = "1" ]; then
+if [ "${CRITIC_ENFORCE:-1}" = "1" ]; then
   enforce_args=(--critic-gate-enforce)
 fi
 
