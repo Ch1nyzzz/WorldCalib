@@ -910,9 +910,7 @@ class LocomoOptimizer:
             iteration, workspace_dir, policy_name
         )
         if not critic_compliant and self.config.critic_gate_enforce:
-            if critic_checks.get("optimism_discount"):
-                reject_reason = "optimism_discount"
-            elif critic_checks.get("verdict_revise"):
+            if critic_checks.get("verdict_revise"):
                 reject_reason = "verdict_revise"
             else:
                 reject_reason = "missing_critic_artifacts"
@@ -1491,11 +1489,17 @@ class LocomoOptimizer:
             "optimism_discount": optimism_discount,
             "verdict_revise": verdict_revise,
         }
+        # The gate enforces only the critic's hard verdict (a `revise` the
+        # proposer shipped against) plus the presence of the mandated artifacts.
+        # optimism_discount is still computed and logged for the calibration
+        # record but no longer gates: P(regress) is a scored prediction, not a
+        # veto threshold. The critic SKILL is now a block-list — only per-type
+        # special-casing / reward-hacking earns a `revise` — so blanket-vetoing
+        # same-family retries (which froze the search at 0.38) no longer happens.
         compliant = bool(
             checks["critique_present"]
             and checks["has_base_rate"]
             and checks["p_regress_present"]
-            and not optimism_discount
             and not verdict_revise
         )
         self._append_event(
