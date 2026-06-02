@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 18, "justification": "Actual deltas: empty 25->18, unknown 33->29 (both shrank), wrong 4->6 grew, correct 38->47. Prediction correctly called unknown shrinking and empty shrinking (not vanishing). Right direction on its two claims, but missed the wrong-cluster growth and gave no magnitude bands."},
+  "trace_movement": {"score": 14, "justification": "Top-2 ranks flipped from all summary/core (only 5 archival) to 87 recall+113 archival - claim strongly confirmed. 256-ceiling completions dropped 27->20 (empties 25->18) - confirmed. But prompt_tokens claim wrong: predicted slight rise, actually fell 1637.5->1478.0."},
+  "side_effects": {"score": 10, "justification": "Summary-demotion risk was real: summary fully ejected from top-2. The token-budget hedge partly held - empties shrank but 18 still hit the 256 ceiling, consistent with the predicted 'theory wrong if not fixed' caveat. No false alarms; reasonable but coarse risk calls."}
+}

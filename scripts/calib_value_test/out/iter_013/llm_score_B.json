@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 21, "justification": "Maps retrieval-miss reduction to unknown cluster: predicted unknown shrink 5-10, actual -8 (33->25), spot-on. Correct 57->63 (+6) implied by passrate. Empty 'stay ~2' actually 3 (+1), minor. Wrong 'flat or +1-2' actual +1 (8->9), correct. Strong directional and magnitude match."},
+  "trace_movement": {"score": 18, "justification": "More docs/task confirmed: retrieved avg 15->49.5. Prompt tokens rose (1460.7->1651.5) consistent with larger pools. Sliding-scale 5/3/2 compression and turn-level/keyword surfacing are plausible but unverifiable from logs. Core verifiable claims confirmed; conservative on unverifiable span details."},
+  "side_effects": {"score": 13, "justification": "Prompt-token rise predicted ~10-20%; actual +13.1% (1460.7->1651.5), accurate. Empty-stay assumption held near 2-3. Wrong-count flat held (+1). The 2-4 truncation regressions are plausible but not directly verifiable; no missed regression or false alarm evident."}
+}

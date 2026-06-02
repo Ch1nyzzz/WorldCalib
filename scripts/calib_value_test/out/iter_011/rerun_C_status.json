@@ -1,0 +1,44 @@
+{
+  "iter": 11,
+  "condition": "C",
+  "returncode": 0,
+  "timed_out": false,
+  "rate_limited": false,
+  "duration_s": 313.8,
+  "wrote_prediction_C": true,
+  "metrics": {
+    "input_tokens": 3746230,
+    "output_tokens": 12114,
+    "total_tokens": 3758344,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 1617408,
+    "total_reported_tokens": 5375752,
+    "estimated_cost_usd": 1.4773990000000001,
+    "duration_s": 313.79,
+    "tool_calls": 43,
+    "tool_counts": {
+      "Bash": 31,
+      "Read": 11,
+      "Write": 1
+    },
+    "read_file_calls": 28,
+    "unique_files_read": 14,
+    "read_lines": 115,
+    "write_file_calls": 1,
+    "written_lines": 20,
+    "evidence_usage": {
+      "runstore_tool_calls": 0,
+      "runstore_trace_tool_calls": 0,
+      "runstore_mod_tool_calls": 0,
+      "raw_trace_file_reads": 4,
+      "raw_reference_file_reads": 21,
+      "raw_summary_file_reads": 0,
+      "raw_evidence_file_reads": 25,
+      "raw_trace_unique_files": 4,
+      "raw_reference_unique_files": 7,
+      "raw_summary_unique_files": 0,
+      "evidence_usage_events": 25,
+      "evidence_usage_rate": 0.0
+    }
+  }
+}

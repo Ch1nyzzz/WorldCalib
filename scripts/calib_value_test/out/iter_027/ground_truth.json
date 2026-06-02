@@ -1,0 +1,60 @@
+{
+  "iteration": 27,
+  "candidate_id": "iter027_mmr_diversity_rerank_2048_top8",
+  "actual_passrate": 0.71,
+  "prev_actual_passrate": null,
+  "clusters": {
+    "correct": 71,
+    "empty": 0,
+    "unknown": 21,
+    "wrong": 8
+  },
+  "n_tasks": 100,
+  "avg_prompt_tokens": 1594.3,
+  "avg_completion_tokens": 236.4,
+  "score_breakdown": {
+    "knowledge-update": {
+      "count": 15,
+      "passrate": 0.9333333333333333,
+      "average_score": 0.9333333333333333
+    },
+    "multi-session": {
+      "count": 27,
+      "passrate": 0.5185185185185185,
+      "average_score": 0.5185185185185185
+    },
+    "single-session-assistant": {
+      "count": 11,
+      "passrate": 1.0,
+      "average_score": 1.0
+    },
+    "single-session-preference": {
+      "count": 4,
+      "passrate": 0.0,
+      "average_score": 0.0
+    },
+    "single-session-user": {
+      "count": 17,
+      "passrate": 0.9411764705882353,
+      "average_score": 0.9411764705882353
+    },
+    "temporal-reasoning": {
+      "count": 26,
+      "passrate": 0.6153846153846154,
+      "average_score": 0.6153846153846154
+    }
+  },
+  "candidate_results_file": "iter027_mmr_diversity_rerank_2048_top8.json",
+  "condition_a_interval": {
+    "delta": [
+      0.01,
+      0.04
+    ],
+    "abs": [
+      0.7,
+      0.73
+    ],
+    "base": 0.69,
+    "raw_line": "passrate Δ: [+0.01, +0.04] from 0.69 to ~0.70–0.73"
+  }
+}

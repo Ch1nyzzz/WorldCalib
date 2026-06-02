@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 9, "justification": "Empty premise wrong: prev empty=0, actual went 0->1 (grew, not 4->0). Wrong cluster: predicted -1..-3, actual -4 (correct direction, mild magnitude undershoot). Unknown predicted flat/grow but actually shrank 26->22 (-4), wrong direction. Half-right on one of three clusters."},
+  "trace_movement": {"score": 19, "justification": "merged_from>1 confirmed in traces (100 tasks, sample=12). Prompt tokens rose 1503.5->1601.8 (+98) as claimed; completion rose 199.8->218.3 as claimed. 'Fewer truncated answers' plausible/unverifiable. Three verifiable claims all confirmed."},
+  "side_effects": {"score": 12, "justification": "Correctly flagged prompt-token rise (+98) and completion rise (+18.5); both held. No-regression call held overall (passrate 0.62->0.69). Missed flagging single-session-preference collapse (0.0/4), slightly over-confident, but core risk calls accurate."}
+}

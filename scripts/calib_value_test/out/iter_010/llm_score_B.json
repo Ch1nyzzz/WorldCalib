@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 13, "justification": "Empty 8->6 (pred 6-8: correct) and unknown 32->29 (pred -2..-4: exact) both right. But wrong jumped 6->12 (+6); pred said flat ~7-9, contradicted, missing the dominant regression. Correct ~flat 54->53. Two of four clusters strong, one badly wrong."},
+  "trace_movement": {"score": 10, "justification": "Variable-length hit blocks confirmed (lengths ~196-2900, floor visible); no excerpts confirmed. But token claim wrong: prompt 1523.6->1354.2 (pred 'flat ~1690', baseline wrong and direction missed); completion 166.8->184.2 rose (pred said 'may drop'). Structural claims hold, quantitative claims fail."},
+  "side_effects": {"score": 8, "justification": "Correctly flagged proportional allocation could regress previously-passing tasks; a real regression occurred (wrong 6->12). But magnitude under-called (predicted 1-3, actual ~+6) and framed as minor. Token-stability side claim also missed. Right risk family, wrong severity."}
+}

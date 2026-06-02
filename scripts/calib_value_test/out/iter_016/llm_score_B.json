@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 15, "justification": "Correct direction on correct(+3) and wrong(+1, exact). But unknown shrink overstated (predicted 3-5; actual 22->21=-1), and empty predicted flat at 3-4 yet actually fell 4->1, the largest delta and wrong-direction call. Mixed accuracy."},
+  "trace_movement": {"score": 14, "justification": "Three named synthesis tasks (8aef76bc, 7405e8b1, 3249768e) all flipped fail->pass with answer-bearing content surfaced, exactly as claimed. But token claim wrong: predicted hits ~10-15% longer / higher prompt tokens, while avg prompt fell 1654.5->1592.4."},
+  "side_effects": {"score": 7, "justification": "Wrong-answer +0-1 risk held (actual +1). But 'higher prompt tokens' was a false alarm (prompt fell). Predicted empty would stay flat (mechanism not addressing it), yet empty improved 4->1 (8cf51dda no longer empty). Narrative-regression risk unverifiable."}
+}

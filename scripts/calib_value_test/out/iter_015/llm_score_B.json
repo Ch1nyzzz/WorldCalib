@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 12, "justification": "Actual deltas: correct 0, empty 0, unknown +4, wrong -4. Wrong-drop call correct (said 2-3, got 4, right direction). But unknown predicted 'roughly stable' while it grew +4 (wrong direction). Empty predicted 0-2 but held at 4 (wrong band). Mixed."},
+  "trace_movement": {"score": 7, "justification": "Three specific recovery claims all FALSE: 3249768e and 8aef76bc stayed unknown; 8cf51dda stayed empty. Hedged 10d9b85a 'may abstain' actually recovered to correct; gpt4_21adecb5 abstain held. Prompt-token slight decrease confirmed (1656.4->1654.5). Mostly unverified/contradicted."},
+  "side_effects": {"score": 9, "justification": "Two correct risk calls held: prompt tokens decreased slightly (-1.9, confirmed) and no Qwen3 empty/formatting regression (empty stayed 4, no rise above 3). But failed to anticipate the unknown-cluster growth (+4) flagged in own falsification criterion."}
+}

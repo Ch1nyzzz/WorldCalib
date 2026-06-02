@@ -1,0 +1,17 @@
+{
+  "score": 15.0,
+  "coverage": 15.0,
+  "sharpness": 0.0,
+  "covered": false,
+  "interval": [
+    0.24,
+    0.34
+  ],
+  "actual": 0.38,
+  "width": 0.1,
+  "parsed_delta": [
+    0.08,
+    0.18
+  ],
+  "parsed_raw_line": "passrate Δ: [+0.08, +0.18] (from 0.16 to ~0.24-0.34)"
+}

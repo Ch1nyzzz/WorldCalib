@@ -1,0 +1,60 @@
+{
+  "iteration": 25,
+  "candidate_id": "iter025_adjacent_archival_merge_1536_top8",
+  "actual_passrate": 0.69,
+  "prev_actual_passrate": 0.62,
+  "clusters": {
+    "correct": 69,
+    "empty": 1,
+    "unknown": 22,
+    "wrong": 8
+  },
+  "n_tasks": 100,
+  "avg_prompt_tokens": 1601.8,
+  "avg_completion_tokens": 218.3,
+  "score_breakdown": {
+    "knowledge-update": {
+      "count": 15,
+      "passrate": 0.8666666666666667,
+      "average_score": 0.8666666666666667
+    },
+    "multi-session": {
+      "count": 27,
+      "passrate": 0.5555555555555556,
+      "average_score": 0.5555555555555556
+    },
+    "single-session-assistant": {
+      "count": 11,
+      "passrate": 1.0,
+      "average_score": 1.0
+    },
+    "single-session-preference": {
+      "count": 4,
+      "passrate": 0.0,
+      "average_score": 0.0
+    },
+    "single-session-user": {
+      "count": 17,
+      "passrate": 0.8823529411764706,
+      "average_score": 0.8823529411764706
+    },
+    "temporal-reasoning": {
+      "count": 26,
+      "passrate": 0.5769230769230769,
+      "average_score": 0.5769230769230769
+    }
+  },
+  "candidate_results_file": "iter025_adjacent_archival_merge_1536_top8.json",
+  "condition_a_interval": {
+    "delta": [
+      0.01,
+      0.04
+    ],
+    "abs": [
+      0.7,
+      0.73
+    ],
+    "base": 0.69,
+    "raw_line": "passrate Δ: [+0.01, +0.04] (from 0.69 to ~0.70–0.73)"
+  }
+}

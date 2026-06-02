@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 15, "justification": "Directions mostly right: empty predicted 8->3-4 (actual 8->6, overstated), unknown predicted -4..-8 (actual -3, near-band), wrong predicted flat/slight-rise (actual +6, badly understated doubling). correct -1 unanticipated. All directions correct but magnitudes off, especially the large wrong-cluster jump."},
+  "trace_movement": {"score": 10, "justification": "Token-drop claim confirmed: prompt 1523.6->1354.2. Boosting partly evidenced (scores differ on 50/100 tasks), but stored retrieved texts are 97/100 identical to prev and show no variable-length hits, so re-ordering and proportional-context claims are largely unverifiable from artifacts."},
+  "side_effects": {"score": 10, "justification": "Token-drop side effect confirmed (prompt down ~11%, completion up). Flagged synthesis-across-low-score-hits regression risk did materialize: wrong cluster doubled 6->12 and passrate dipped 0.54->0.53, consistent with the risk it raised, though framed as mitigated by the floor."}
+}

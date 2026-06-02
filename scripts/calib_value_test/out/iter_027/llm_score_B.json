@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 14, "justification": "No prev clusters (iter26 null), so judged vs actual: empty=0, unknown=21, wrong=8. Predicted empty drops to ~0 (correct) and wrong stays flat/-1-2 (wrong is low at 8, plausible). But claimed unknown shrinks 'slightly'; unknown remains large (21, the dominant cluster), so the abstain-reduction thesis is weak. Partial credit."},
+  "trace_movement": {"score": 11, "justification": "Avg prompt 1594, completion 236; no token-up regression, mild consistency with 'prompt may rise modestly'. Retrieved[] present per task but diversity/redundancy-reduction and 'aggregation tasks break through' claims are unverifiable without a prev baseline (None). Plausible but uncheckable span claims capped below full."},
+  "side_effects": {"score": 10, "justification": "Correctly called: no API errors (none observed), prompt token rise modest (1594 reasonable), empty cluster=0 held. Negligible-runtime claim unverifiable. Did not flag the persistent large unknown/abstain cluster (21) as a residual risk, but no false alarms materialized. Solid."}
+}

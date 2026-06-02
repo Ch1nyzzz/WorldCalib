@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 12, "justification": "Anchored to wrong baseline (~0.69 prev). Got direction right that 'unknown' shrinks and 'correct' grows, but massively understated magnitude (predicted unknown flat/-1-2; actual -58, correct +47). Wrong predicted 'flat ~6' rose to 10; empty 'stay ~1' rose to 3. Directions partly right, magnitudes/counts off."},
+  "trace_movement": {"score": 7, "justification": "Explicit claim 'No change in prompt length' is contradicted: prompt tokens rose 916->1558 (+642) and completion 107->224, from restoring the iter_016 stack. List-block retrieval claim plausible but unverifiable. The one falsifiable token claim was wrong, so low credit."},
+  "side_effects": {"score": 7, "justification": "Flagged budget pressure pushing out tail hits 'without major regressions'; passrate did recover strongly. But missed the wrong-answer regression (2->10) and empty rise (0->3) that its own falsification list named as risks, while predicting they'd stay flat. Partial credit for the no-major-regression call."}
+}

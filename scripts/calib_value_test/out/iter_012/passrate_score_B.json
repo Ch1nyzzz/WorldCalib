@@ -1,0 +1,17 @@
+{
+  "score": 17.5,
+  "coverage": 17.5,
+  "sharpness": 0.0,
+  "covered": false,
+  "interval": [
+    0.5,
+    0.54
+  ],
+  "actual": 0.57,
+  "width": 0.04,
+  "parsed_delta": [
+    0.03,
+    0.07
+  ],
+  "parsed_raw_line": "passrate Δ: [+0.03, +0.07] (from iter_011's 0.47 to ~0.50–0.54)"
+}

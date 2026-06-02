@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 4, "justification": "Mostly wrong. Predicted empty 4->0; actual empty 0->1 (grew, opposite). Unknown predicted flat/+-1 but actually 26->22 (-4). Wrong predicted flat/+1 but actually 12->8 (-4). Correct grew 62->69. Baseline assumption fabricated; nearly all cluster directions/magnitudes missed."},
+  "trace_movement": {"score": 6, "justification": "Avg completion rose 199.8->218.3 (direction right) but cited absurd ~1100 vs ~950 numbers, far off. 'Zero 0-completion tasks' false (1 empty). Prompt tokens actually rose 1503.5->1601.8, contradicting later claim. Retrieval-merge hit-count claims unverifiable."},
+  "side_effects": {"score": 4, "justification": "'No prompt-length increase' contradicted: prompt grew ~98 tokens. Overall no-regression directionally held (passrate 0.62->0.69). 8cf51dda list-regression risk unverifiable (task absent) and did not materialize as net regression. Mostly false alarm."}
+}

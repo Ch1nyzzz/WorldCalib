@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 16, "justification": "unknown 52->34 (-18): predicted shrink 8-15, right direction, slightly under magnitude. empty 12->7: right direction but wrong premise (~25) and missed <5 target. wrong 9->10: said stable, held. Solid on direction, weak on magnitudes."},
+  "trace_movement": {"score": 4, "justification": "Completion >256 'for many empty tasks': contradicted, count 16->17 and avg ctok fell 176.8->162.9. 'More hits 8-12 vs 4-6': contradicted, hits ~15.2 both iters, unchanged. Only the unverifiable 'exact words' claim survives, judged conservatively."},
+  "side_effects": {"score": 3, "justification": "'Prompt tokens may rise slightly': contradicted, they dropped 1813->1409 (wrong-direction false alarm). 'Dropping cross-sentence context' risk: speculative, unconfirmed and passrate rose. No correct risk call landed."}
+}

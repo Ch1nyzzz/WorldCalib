@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 16, "justification": "Unknown -2..-6 predicted vs actual 25->18 (-7): right direction, near band. Empty 2-4 held (3->4): correct. Wrong predicted flat/+1 but actually 9->12 (+3): wrong-direction magnitude miss. Correct +3 implied. Two of three clusters right."},
+  "trace_movement": {"score": 9, "justification": "Fewer Unknown responses confirmed (31->23 in raw preds). List sentence-count expansion plausible but unverified. But explicit claim that 3249768e and 8aef76bc move from regressed to stable pass is contradicted: both still abstain Unknown, score 0, and were already failing in iter_013."},
+  "side_effects": {"score": 7, "justification": "Prompt-token rise ~3-8% overstated: overall avg +0.3% (1651.5->1656.4). The flagged 1-2 list-crowding regression risk partially materialized as wrong-cluster +3 (9->12), so the regression call held directionally but undercounted."}
+}

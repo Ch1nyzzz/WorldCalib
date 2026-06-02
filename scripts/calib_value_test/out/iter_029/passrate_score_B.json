@@ -1,0 +1,17 @@
+{
+  "score": 0.0,
+  "coverage": 0.0,
+  "sharpness": 0.0,
+  "covered": false,
+  "interval": [
+    0.71,
+    0.73
+  ],
+  "actual": 0.11,
+  "width": 0.02,
+  "parsed_delta": [
+    0.0,
+    0.02
+  ],
+  "parsed_raw_line": "passrate Δ: [+0.00, +0.02] from the iter_027 baseline of ~0.71, yielding an absolute passrate of ~0.71–0.73 (equivalently, +0.03 to +0.05 from iter_028's 0.68)."
+}

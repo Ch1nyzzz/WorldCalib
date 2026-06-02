@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 15, "justification": "Empty 4->0 nailed (actual empty=0); 0bc8ad93 empty->wrong 'Yes, with a friend' confirmed exactly. But 'wrong stays ~7+-1' contradicted (actual wrong=12, higher) and 'unknown shrinks 1-3' is unverifiable with null iter_23 baseline and unknown is high at 26. Mixed direction accuracy."},
+  "trace_movement": {"score": 16, "justification": "'Fewer predictions at exactly 1024 completion tokens' fully confirmed: zero tasks at 1024, max completion 1386, avg 199.8. Contiguous-window sentence-ordering claim plausible but not directly verifiable from JSON, judged conservatively. Core token-truncation claim strongly supported."},
+  "side_effects": {"score": 9, "justification": "Prompt-token rise flagged as possible; avg prompt 1503.5, consistent though modest. Cross-region-passage regression risk (0-2) was hedged and not confirmable as triggered. No clearly-missed regression, but passrate actually dropped to 0.62 vs predicted gain; risk calls were cautious not predictive."}
+}

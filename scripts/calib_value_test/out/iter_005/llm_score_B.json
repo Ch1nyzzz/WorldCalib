@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 8, "justification": "Dominant move wrong: predicted unknown shrinks 3-6, but unknown GREW +14 (34->48), contradicted. Correct on empty shrinking (7->3, predicted stable/-1-2, magnitude under) and wrong stable (10->10). Net direction of headline cluster badly missed."},
+  "trace_movement": {"score": 6, "justification": "Predicted prompt tokens rise; actual FELL ~90 (1408.7->1318.9), contradicted. Of two named list cases, 8cf51dda converted to pass but 3249768e still failed. Per-hit length/span claims unverifiable. Few verifiable claims confirmed."},
+  "side_effects": {"score": 6, "justification": "Correct call that wrong-answer would not regress (10->10 held). But token-rise risk contradicted (tokens fell), and empty-increase concern reversed (empty fell 7->3). One holding stability call, two mis-directed risk flags."}
+}

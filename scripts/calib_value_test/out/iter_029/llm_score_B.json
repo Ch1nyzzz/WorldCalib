@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 1, "justification": "Every cluster claim contradicted. Predicted empty stays 0 (actual 0->81), correct stable ~68 (actual ->11), unknown ~29 (actual 17->7), wrong ~15 unchanged (actual 15->1). The catastrophic empty regression was explicitly predicted NOT to happen."},
+  "trace_movement": {"score": 1, "justification": "Predicted tokens ~1830 and only slight score shifts; actual avg prompt 1607->296, completion 202->29 due to pipeline crash. 81 tasks have 0 tokens, 0 retrieved, evaluation_error KeyError 'choices'. No retrieval-span elevation occurred; claims wholly contradicted."},
+  "side_effects": {"score": 0, "justification": "Critical miss: predicted 'No new empty-output regressions expected' and listed empty reappearance as a falsifier, yet 81/100 tasks crashed with KeyError 'choices' producing empty outputs. The exact regression it dismissed actually dominated the iteration."}
+}

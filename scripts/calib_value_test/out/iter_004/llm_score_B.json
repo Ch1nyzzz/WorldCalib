@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 16, "justification": "Actual deltas: correct 27->49, empty 12->7, unknown 52->34, wrong 9->10. Empty-shrink direction right (predicted 4-6 vs 7). Wrong stable (+1, predicted <=2) correct. But unknown badly missed: anchored on iter_002's 30 and predicted near-stable, while it dropped 18 (52->34). Implied large correct gain right."},
+  "trace_movement": {"score": 10, "justification": "Hit-text compression confirmed (2427->1101 chars/hit) and completion slightly down (176.8->162.9). But '256 ceiling' claim contradicted: 0 hits at 256, ceiling was 512 both iters. Hit count unchanged (~15.2), not 4-5->6-8. Prompt tokens fell 1813->1409, opposite of 'rise.' Score range unverified."},
+  "side_effects": {"score": 8, "justification": "Correctly predicted wrong-answer would not regress (9->10, +1, within <=2). List-structure hedge plausible vs persistent unknowns. But explicit 'prompt tokens may rise slightly' was a false alarm: they fell ~405. Net one good call, one wrong."}
+}

@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 13, "justification": "Empty: predicted 10->2-4, actual 11->8 (right direction, magnitude overstated). Wrong: predicted flat/up, actual 10->6 (down, contradicted). Unknown synthesis: predicted shrink, actual grew 26->32 (wrong direction). Correct ~flat (53->54). Mixed: one good call, two off."},
+  "trace_movement": {"score": 13, "justification": "Completion tokens predicted down: confirmed 205.4->166.8. Prompt predicted up; actually fell 1588->1524 (mild miss; dual-pass retained). Cap-512 hits dropped 13->8. Excerpts-section span claim unverifiable in raw JSON, judged plausible. Most token claims confirmed."},
+  "side_effects": {"score": 9, "justification": "Completion-token drop correctly called and held. Prompt-token rise wrong (fell). Flagged narrative-flow regression risk plausibly aligns with unknown cluster growing 26->32. Partial credit: one confirmed, one false, one defensible."}
+}
