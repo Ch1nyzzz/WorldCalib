@@ -1621,6 +1621,16 @@ class LocomoOptimizer:
         import re as _re
 
         critic_cwd = workspace_dir.parent / "critic_grader"
+        # Historical grading ledger (this iter's row is appended AFTER grading,
+        # so the critic only sees prior rows) — gives the fresh-context critic a
+        # consistent scale anchor so its 0–100 numbers are comparable across
+        # iters instead of drifting.
+        ledger_path = self.run_dir / "prediction_grades.md"
+        ledger_text = (
+            ledger_path.read_text(encoding="utf-8")
+            if ledger_path.is_file()
+            else "(no prior gradings yet — this is the first.)"
+        )
         try:
             critic_cwd.mkdir(parents=True, exist_ok=True)
             (critic_cwd / "critic_input.md").write_text(
@@ -1630,7 +1640,9 @@ class LocomoOptimizer:
                 "## measured outcome (mechanical metrics vs declared base)\n"
                 "```json\n"
                 f"{_json.dumps(metrics, ensure_ascii=False, indent=2)[:4000]}\n"
-                "```\n",
+                "```\n\n"
+                "## your past grading ledger (consistent-scale anchor)\n"
+                f"{ledger_text[:5000]}\n",
                 encoding="utf-8",
             )
         except OSError as exc:
@@ -1641,19 +1653,26 @@ class LocomoOptimizer:
             "a fresh context with no stake in the candidate. Read "
             "`./critic_input.md` in your cwd: it holds a proposer's TWO-SIDED "
             "prediction (which question types it expected to IMPROVE / might "
-            "REGRESS, relative to a declared base) and the MEASURED "
-            "per-question-type outcome.\n\n"
+            "REGRESS, relative to a declared base), the MEASURED per-question-type "
+            "outcome, and YOUR PAST GRADING LEDGER.\n\n"
             "Grade ONLY the quality of the PREDICTION (its calibration / "
             "world-model), NOT how good the patch was. Reward naming the types "
             "that truly moved — gains AND regressions; penalize SURPRISE "
             "regressions (real regressions it failed to name) most heavily; do "
             "not reward vague optimism. A prediction that honestly named a "
             "downside that then happened is BETTER than one that ignored it.\n\n"
+            "CRITICAL — be consistent across iterations: use the past grading "
+            "ledger as your scale. Predictions with similar mechanical metrics "
+            "(upside hit rate, downside recall, surprise regressions) must get "
+            "similar scores. Explicitly state whether THIS prediction is BETTER "
+            "or WORSE than the recent ledger entries and score accordingly — e.g. "
+            "if surprise regressions dropped or downside recall rose vs last "
+            "iter, the score must go UP even if the patch itself did worse.\n\n"
             "Write your verdict to `./critic_grade.md` with EXACTLY this shape:\n"
             "SCORE: <integer 0-100>\n"
-            "REASONING: <2-5 sentences: which types it called right, which it "
-            "missed, and the single most important world-model fix for next "
-            "iter>\n"
+            "REASONING: <2-5 sentences: vs the ledger is this better/worse and "
+            "why; which types it called right, which it missed; and the single "
+            "most important world-model fix for next iter>\n"
         )
         try:
             result = self._run_proposer_agent(
@@ -1737,10 +1756,37 @@ class LocomoOptimizer:
             ]
             fb.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
+            # Append to the cumulative grading ledger (critic's scale anchor for
+            # next iter). critic_score and the mechanical metrics are tracked in
+            # SEPARATE columns — they are two distinct measures (subjective LLM
+            # grade vs objective set-membership metrics) and are analysed apart.
+            ledger_path = self.run_dir / "prediction_grades.md"
+            reason1 = (reasoning or "").strip().split("\n")[0][:160]
+            if not ledger_path.exists():
+                ledger_path.write_text(
+                    "# Prediction grading ledger (consistent-scale anchor)\n\n"
+                    "| iter | critic_score | upside_hit | down_recall | "
+                    "surprise | net_ok | overallΔ | base | reason |\n"
+                    "|---|---|---|---|---|---|---|---|---|\n",
+                    encoding="utf-8",
+                )
+            with ledger_path.open("a", encoding="utf-8") as fh:
+                fh.write(
+                    f"| {iteration} | {score} | "
+                    f"{metrics.get('upside_hit_rate')} | "
+                    f"{metrics.get('downside_recall')} | "
+                    f"{metrics.get('n_surprise_regressions')} | "
+                    f"{metrics.get('net_bet_correct')} | "
+                    f"{metrics.get('overall_delta')} | "
+                    f"{parsed.base_raw or 'n/a'} | {reason1} |\n"
+                )
+
             self._append_event(
                 {
                     "iteration": iteration,
                     "event": "prediction_score",
+                    # subjective LLM grade — tracked separately from the
+                    # objective mechanical metrics below
                     "critic_score": score,
                     "upside_hit_rate": metrics.get("upside_hit_rate"),
                     "downside_recall": metrics.get("downside_recall"),
@@ -1748,6 +1794,7 @@ class LocomoOptimizer:
                     "net_bet_correct": metrics.get("net_bet_correct"),
                     "overall_delta": metrics.get("overall_delta"),
                     "base_iter": base_iter,
+                    "base_raw": parsed.base_raw,
                 }
             )
         except Exception as exc:  # noqa: BLE001
