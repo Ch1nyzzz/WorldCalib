@@ -282,11 +282,15 @@ category.
    <which predicted gain or regression, if it does NOT happen, refutes the mechanism>
    ```
 
-   Use the `score_breakdown` question categories as the units — predict at the
-   **category** level, not per individual task. Next iter the critic scores: did
-   the Upside categories actually improve, did the Downside categories you named
-   regress (and did any category regress that you did NOT name), and was your
-   Net-bet direction right.
+   Use the LoCoMo `score_breakdown` categories as the units — these are exactly:
+   `multi-hop`, `temporal`, `open-domain`, `single-hop` (the 4 answerable
+   question categories). Write your Upside/Downside bullets with THESE exact
+   labels (e.g. `- temporal: …`), NOT ad-hoc groupings or per-task ids — the
+   critic matches your labels against these keys. Predict at the **category**
+   level, not per individual task. Next iter the critic scores: did the Upside
+   categories actually improve, did the Downside categories you named regress
+   (and did any category regress that you did NOT name), and was your Net-bet
+   direction right.
 
 4. **Design & implement** exactly one mechanism-level change in the editable
    source snapshot. One candidate tests one hypothesis — if you are tempted to
