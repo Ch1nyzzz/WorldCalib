@@ -267,6 +267,7 @@ type.
    ```
    # iter_<THIS> prediction
    ## Candidate (one line)
+   ## Base (which prior iter's stack this builds on — `iter_<N>`, or `clean`)
    ## Mechanism (why the change should move the metric)
    ## Upside — question types this should IMPROVE (and why)
    - <qtype>: <why this mechanism helps this type>
