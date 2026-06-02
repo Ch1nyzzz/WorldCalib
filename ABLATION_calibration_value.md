@@ -1,4 +1,4 @@
-# 消融实验：WMC calibration 内容到底有没有预测价值？（A / C / B 三臂）
+# 消融实验：A 有没有比 C 预测得更准？（累积 calibration 到底有没有用）
 
 **日期**：2026-06-02
 **作者**：Yuhan Chen (Ch1nyzzz)
@@ -8,205 +8,183 @@
 
 ## 0. 一句话结论
 
-把 proposer 累积的 `world_model_calibration.md` **整个抽空**（零 WMC，下称 **C** 臂），
-它对下一轮 candidate 结果的**客观数值预测**和带全量 calibration 的 proposer **一样准**
-（甚至略好）。calibration 文本作为"知识库"**没有可迁移的预测价值**——
-主实验里 WMC 的端到端收益更可能来自 **predict-then-execute 这个纪律本身**，
-而不是这份文件被复用。
+让同一个 kimi-k2.6 预测**同一个固定 candidate** 的结果，比较两种状态：
+**A**（真实 WMC proposer：读了累积的 `world_model_calibration.md`、自己设计了 candidate）
+对 **C**（零 WMC：calibration 是空的）。
+
+- **在客观的 passrate 维度，A 没有比 C 准**（A−C = −2.25，甚至略输）。
+- A 在定性维度有一点稳定优势（+4.62），但它**不随 calibration 变厚而增长**
+  （Spearman ≈ 0），是"自己设计的方案自己更懂"这个**恒定**效应，不是 calibration 累积的功劳。
+
+**累积的 `world_model_calibration.md` 并没有让 proposer 把下一轮结果预测得更准。**
+主实验里 WMC 的端到端收益，更可能来自 **predict-then-execute 这个纪律本身**，
+而不是这份文件作为知识库被复用。
 
 ---
 
-## 1. 动机：为什么需要一条"完全看不到 WMC"的臂
+## 1. 核心问题与动机
 
-最初的 calibration-value 测试只有两臂：
+WMC 协议让 proposer 每轮把对 candidate 的预测写下来、跑完用 mismatch 校准世界模型，
+calibration 文件 **append-only、越积越厚**。一个直接的疑问是：
 
-- **A**（历史）：proposer 当轮真实写下的 `prediction.md`，它当时只看得到 `iter < N` 的 calibration；
-- **B**（反事实）：拿**最终完整 calibration 减去 iter N 自己那段**、并把 iter N 的结果**数字抹掉**，让一个全新 kimi 重新只做预测。
+> 这份越来越厚的 calibration，真的让 proposer 对结果预测得**更准**了吗？
 
-问题在于 **A 并不是"零 WMC"基线**：对任意 `N ≥ 2`，A 都看得到此前累积的 calibration，
-只是比 B 少。唯一例外是 **iter 1 的 A**——此前没有任何 distill，它恰好等于零 WMC。
-而在那个最干净的点上，零 WMC 的 A（composite 45）反而**高于**看到几乎全量 calibration 的
-B（composite 33）。这促使我们补一条对所有 iter 都成立的、严格零知识的 **C 臂**。
+要回答它，就把同一个 proposer 放进两种世界里，让它预测**同一个已经定好的 candidate** 会怎样：
+
+- **A**：它在真实那一轮的状态——读过 `iter < N` 的全部 distill，且这个 candidate 是它**自己设计**的。
+- **C**：把 calibration **清空**（只留任务说明 preamble，零 distill），其余完全一样，重新预测同一个 candidate。
+
+如果 calibration 有用，**A 应该比 C 预测得更准**，而且 calibration 越厚、A 的优势越大。
 
 ---
 
 ## 2. 实验设计
 
-对每个可观测 iteration N，用**同一个固定 candidate**、**同一个真实结果**、**同一套盲评 rubric**，
-比较三种预测：
-
-| 臂 | 看到的 calibration | candidate 来源 | 是否带 hindsight |
+| 臂 | 看到的 calibration | candidate | 说明 |
 |---|---|---|---|
-| **A**（历史） | 只有 `iter < N` | **自己设计的** | 无（只看过去） |
-| **B**（反事实） | 最终完整 calibration **减 iter N**、数字抹掉 | 固定（别人给的） | **有**（残留 distill 仍定性引用 iter N） |
-| **C**（零 WMC 基线） | **空**——只有任务说明 preamble，**零 distill** | 固定（别人给的） | **无**（什么都没看到） |
+| **A** | `iter < N` 的全部 distill（真实累积） | 自己设计的 | 真实 WMC proposer 当轮状态 |
+| **C** | **空**（仅 788 字符任务 preamble，零 distill） | 同一个固定 candidate | 零 WMC 基线 |
 
-两组对比各自隔离不同的变量：
-
-- **C vs B —— 最干净的"calibration 内容"隔离**：两臂都预测一个自己没设计的固定 candidate，
-  唯一变量就是 calibration 空 vs 满。其中 **passrate 维度是 B 唯一无法靠 hindsight 取巧的维度**
-  （iter N 的数字已被抹掉），所以这个维度上打平，就意味着累积内容没有可迁移的数值预测价值。
-- **C vs A —— 端到端 gap（有混淆）**：A 额外带着"自己设计了 candidate、更懂它的 failure mode"
-  这个优势，所以 C vs A 读作端到端差距，**不是**干净的 calibration-content 效应。
+两臂用**同一个 kimi-k2.6 模型**、**同一个真实结果**、**同一套盲评 rubric** 打分，
+唯一有意改变的变量是"看不看得到累积 calibration"。
 
 ### 评分（composite 0–100）
 
 | 维度 | 分值 | 怎么算 |
 |---|---:|---|
-| passrate-Δ | 40 | **确定性**（`score.py`）：覆盖 25（实际值落在预测区间内）+ 锐度 15（正确且区间越窄越高） |
-| failure-type movement | 25 | 盲评 LLM 判官 vs `prev→actual` 的 failure-cluster delta |
+| passrate-Δ | 40 | **确定性**：预测的分数区间是否套中真实 passrate（覆盖 25 + 锐度 15） |
+| failure-type movement | 25 | 盲评判官 vs `prev→actual` 的 failure-cluster delta |
 | trace movement | 20 | 盲评 vs token delta + 原始 `candidate_results` |
 | side-effects | 15 | 盲评：回归 / 风险判断是否命中 |
 
-**只有 passrate 维度是确定性、三臂完全可比的**；其余三个定性维度由盲评判官打分。
+**只有 passrate 维度是确定性、不依赖判官、且与"谁设计的 candidate"无关的**——
+它是判断"A 是否真的更准"最干净的维度。
 
 ---
 
-## 3. 实现
+## 3. 实现与复现
 
 全部在 `scripts/calib_value_test/`：
 
-- `common.py` — `build_empty_calibration()`（C 的零知识 calibration = 仅 788 字符的任务 preamble）、
-  `build_loo_calibration()`（B 的 leave-one-out + 数字抹除）、预测区间解析、failure-cluster 计算。
-- `stage.py` — 每个 iter 同时物化 B、C 两个 scratch workspace（空/满 calibration + 固定 candidate + 预测-only prompt）。
-- `rerun_b.py --condition {B,C}` — 忠实复刻原始 proposer 调用（kimi-k2.6 / docker），只换 calibration 内容。
-- `score.py --emit-inputs / --aggregate` — 确定性 passrate 分 + 盲评输入 + 三臂聚合。
-
-复现（已 source `.env`，带 `KIMI_API_KEY`）：
+- `common.py` — `build_empty_calibration()`（C 的零知识 calibration）、预测区间解析、failure-cluster 计算。
+- `stage.py` — 把每个 iter 的真实 proposer workspace 复制成 scratch，换上空 calibration + 固定 candidate + 预测-only prompt。
+- `rerun_b.py --condition C` — 忠实复刻原始 proposer 调用（kimi-k2.6 / docker），只把 calibration 换空。
+- `score.py` — 确定性 passrate 分 + 盲评输入 + A vs C 聚合（含厚度分桶）。
+- `plot_trend.py` — 画 A vs C 随 iter 的趋势图。
 
 ```bash
 ITERS=1,2,3,4,5,6,8,9,10,11,12,13,14,15,16,17,18,19,20,24,25,27,28,29
-python scripts/calib_value_test/stage.py --iters $ITERS
+python scripts/calib_value_test/stage.py     --iters $ITERS
 python scripts/calib_value_test/rerun_b.py --condition C --iters $ITERS --workers 4
-python scripts/calib_value_test/score.py --iters $ITERS --emit-inputs
+python scripts/calib_value_test/score.py     --iters $ITERS --emit-inputs
 # 每个 out/iter_NNN/scorer_input_C.md 跑一个盲评 subagent → llm_score_C.json
-python scripts/calib_value_test/score.py --iters $ITERS --aggregate
+#（A 的盲评分沿用原始批次）
+python scripts/calib_value_test/score.py     --iters $ITERS --aggregate
+python scripts/calib_value_test/plot_trend.py
 ```
 
-覆盖 LongMemEval-s WMC run 的 **24 个 iter**，C 臂 24/24 全部成功产出预测。
+覆盖 LongMemEval-s WMC run 的 **24 个 iter**（A、C 各 24 条预测）。
 
 ---
 
 ## 4. 结果
 
-### 4.1 配对统计（Δ = 第一臂 − 第二臂）
+### 4.1 配对统计（Δ = A − C，**正数 = A 预测得更准**）
 
-| 对比 | 维度 | mean Δ | t | 胜/负/平 |
-|---|---|---:|---:|:--:|
-| **C − A** | **passrate（客观）** | **+2.25** | +1.27 | **12 / 4 / 8** |
-| **C − A** | 定性（fail+trace+side） | −4.62 | −3.26 | 5 / 18 / 1 |
-| **C − A** | composite | −2.38 | −0.93 | 10 / 13 / 1 |
-| **C − B** | **passrate（客观）** | **−1.30** | −0.56 | **6 / 7 / 11** |
-| **C − B** | 定性（fail+trace+side） | −4.54 | −2.72 | 7 / 16 / 1 |
-| **C − B** | composite | −5.84 | −1.77 | 6 / 17 / 1 |
+| 维度 | mean Δ | t | A 胜/负/平 |
+|---|---:|---:|:--:|
+| **passrate（客观）** | **−2.25** | −1.27 | **4 / 12 / 8** |
+| 定性（fail+trace+side） | +4.62 | +3.26 | 18 / 5 / 1 |
+| composite | +2.38 | +0.93 | 13 / 10 / 1 |
 
-均值 composite：**A = 45.0，B = 48.5，C = 42.7**（/100）。
-均值 passrate（/40）：**A = 16.3，C = 18.5**（C 在客观维度反而更高）。
+均值 composite：**A = 45.0，C = 42.7**（/100）。
 
-### 4.2 逐 iter（A vs C）
+读法：
+- **客观 passrate 维度，A 反而略输 C**（−2.25，12 负 4 胜）——看了 calibration 并没有让数值预测更准。
+- A 的 composite 略高，**全部来自定性维度**（+4.62，显著）。
 
-| iter | actual | A pass | A tot | C pass | C tot | C−A |
+### 4.2 逐 iter（A vs C 的 composite）
+
+| iter | actual | A pass | A tot | C pass | C tot | A−C |
 |---|---|---|---|---|---|---|
-| 1 | 0.38 | 15.0 | 45.0 | 28.8 | 52.8 | +7.8 |
-| 2 | 0.47 | 34.0 | 76.0 | 17.5 | 42.5 | −33.5 |
-| 3 | 0.27 | 0.0 | 20.0 | 0.0 | 22.0 | +2.0 |
-| 4 | 0.49 | 5.0 | 28.0 | 20.0 | 48.0 | +20.0 |
-| 5 | 0.39 | 0.0 | 14.0 | 0.0 | 8.0 | −6.0 |
-| 6 | 0.50 | 12.5 | 51.5 | 34.8 | 64.8 | +13.2 |
-| 8 | 0.53 | 20.0 | 45.0 | 12.5 | 34.5 | −10.5 |
-| 9 | 0.54 | 17.5 | 52.5 | 15.0 | 34.0 | −18.5 |
-| 10 | 0.53 | 12.5 | 47.5 | 20.0 | 49.0 | +1.5 |
-| 11 | 0.47 | 2.5 | 29.5 | 7.5 | 31.5 | +2.0 |
-| 12 | 0.57 | 34.8 | 72.8 | 17.5 | 53.5 | −19.2 |
-| 13 | 0.63 | 35.5 | 86.5 | 35.5 | 71.5 | −15.0 |
-| 14 | 0.66 | 37.0 | 75.0 | 37.8 | 74.8 | −0.2 |
-| 15 | 0.66 | 17.5 | 37.5 | 22.5 | 48.5 | +11.0 |
-| 16 | 0.69 | 37.0 | 77.0 | 37.8 | 73.8 | −3.2 |
+| 1 | 0.38 | 15.0 | 45.0 | 28.8 | 52.8 | −7.8 |
+| 2 | 0.47 | 34.0 | 76.0 | 17.5 | 42.5 | +33.5 |
+| 3 | 0.27 | 0.0 | 20.0 | 0.0 | 22.0 | −2.0 |
+| 4 | 0.49 | 5.0 | 28.0 | 20.0 | 48.0 | −20.0 |
+| 5 | 0.39 | 0.0 | 14.0 | 0.0 | 8.0 | +6.0 |
+| 6 | 0.50 | 12.5 | 51.5 | 34.8 | 64.8 | −13.2 |
+| 8 | 0.53 | 20.0 | 45.0 | 12.5 | 34.5 | +10.5 |
+| 9 | 0.54 | 17.5 | 52.5 | 15.0 | 34.0 | +18.5 |
+| 10 | 0.53 | 12.5 | 47.5 | 20.0 | 49.0 | −1.5 |
+| 11 | 0.47 | 2.5 | 29.5 | 7.5 | 31.5 | −2.0 |
+| 12 | 0.57 | 34.8 | 72.8 | 17.5 | 53.5 | +19.2 |
+| 13 | 0.63 | 35.5 | 86.5 | 35.5 | 71.5 | +15.0 |
+| 14 | 0.66 | 37.0 | 75.0 | 37.8 | 74.8 | +0.2 |
+| 15 | 0.66 | 17.5 | 37.5 | 22.5 | 48.5 | −11.0 |
+| 16 | 0.69 | 37.0 | 77.0 | 37.8 | 73.8 | +3.2 |
 | 17 | 0.17 | 0.0 | 4.0 | 0.0 | 4.0 | +0.0 |
-| 18 | 0.64 | 7.5 | 33.5 | 12.5 | 46.5 | +13.0 |
-| 19 | 0.61 | 2.5 | 35.5 | 5.0 | 24.0 | −11.5 |
-| 20 | 0.69 | 22.5 | 52.5 | 37.8 | 68.8 | +16.2 |
-| 24 | 0.62 | 2.5 | 24.5 | 7.5 | 28.5 | +4.0 |
-| 25 | 0.69 | 22.5 | 62.5 | 22.5 | 45.5 | −17.0 |
-| 27 | 0.71 | 37.8 | 70.8 | 37.8 | 65.8 | −5.0 |
-| 28 | 0.68 | 15.0 | 33.0 | 15.0 | 29.0 | −4.0 |
-| 29 | 0.11 | 0.0 | 7.0 | 0.0 | 3.0 | −4.0 |
+| 18 | 0.64 | 7.5 | 33.5 | 12.5 | 46.5 | −13.0 |
+| 19 | 0.61 | 2.5 | 35.5 | 5.0 | 24.0 | +11.5 |
+| 20 | 0.69 | 22.5 | 52.5 | 37.8 | 68.8 | −16.2 |
+| 24 | 0.62 | 2.5 | 24.5 | 7.5 | 28.5 | −4.0 |
+| 25 | 0.69 | 22.5 | 62.5 | 22.5 | 45.5 | +17.0 |
+| 27 | 0.71 | 37.8 | 70.8 | 37.8 | 65.8 | +5.0 |
+| 28 | 0.68 | 15.0 | 33.0 | 15.0 | 29.0 | +4.0 |
+| 29 | 0.11 | 0.0 | 7.0 | 0.0 | 3.0 | +4.0 |
 
----
+### 4.3 A 的优势随 iter 怎么变？
 
-## 5. 解读
-
-### A vs C 单独不足以定论——它混入了 candidate-design 优势
-
-C 的 composite 略低于 A（−2.38，t≈−0.93，不显著），但这个差距**全部来自定性维度**
-（−4.62，t≈−3.26，显著）。而 A 在定性维度占优，主要不是因为它看了 calibration，而是因为
-**A 是 candidate 的设计者**——它天然更了解自己这次改动的 failure mode / trace 走向。
-一旦看**客观、不可作弊的 passrate 维度**，零 WMC 的 **C 反而略优**（+2.25，12 胜 4 负 8 平）。
-
-### 真正干净的判据是 C vs B：客观维度打平
-
-要剥掉 candidate-design 这个混淆，就看 **C vs B**（两臂都不设计 candidate）。
-在 B **唯一无法靠 hindsight 取巧的 passrate 维度**上，C 与 B **统计打平**
-（mean −1.30，t≈−0.56，**11 个平局**）。也就是说：把全量世界模型喂给 proposer，
-并没有让它对下一轮的**数值结果**预测得更准。
-
-B 在 composite 上的表面优势（B=48.5 最高），几乎全部来自**定性维度**
-（C−B 定性 −4.54，显著），而那恰恰是 B 残留的"未来 distill"文本能定性剧透该 iter
-failure mode 的地方——是 **hindsight，不是可迁移的世界模型能力**。
-
-### Bottom line
-
-两个干净视角——**C vs B 的内容隔离** 与 **C vs A 的客观 passrate 维度**——都指向同一结论：
-
-> 累积的 `world_model_calibration.md` **没有可迁移的预测价值**：一个白板 proposer
-> 预测 iteration 结果的准确度基本一样。这与主实验中 WMC 的端到端收益来自
-> **predict-then-execute 纪律本身**（强制下注 + 对齐 mismatch），而非把 calibration
-> 当作可复用知识库，是一致的。
-
----
-
-## 5b. calibration 的"累积厚度"有没有带来增益？——看 A−C 随 iter 的趋势
-
-这是检验 calibration 价值最直接的角度。calibration 是 **append-only、每轮变厚**的：
-A 看到的世界模型越来越丰富，而 C 永远是空白。
-**如果"累积的 calibration 知识"真的有用，A 相对 C 的优势就应该随 iter 增长。** 实测相反：
+calibration 每轮变厚，C 永远空白。**若累积内容有用，A−C 应随 iter 增长。** 实测相反：
 
 ![A vs C 随 iter 趋势](scripts/calib_value_test/out/trend_A_vs_C.png)
 
-> 复现：`python scripts/calib_value_test/plot_trend.py`
-
-| A − C（A 的优势） | 前 12 iter 均值 | 后 12 iter 均值 | 线性斜率 |
+| A − C | 前 12 iter 均值 | 后 12 iter 均值 | 线性斜率 |
 |---|---:|---:|---:|
-| 定性 gap（fail+trace+side） | **+6.33** | **+2.92** | −0.08 / iter |
-| 总分 gap（composite） | **+4.69** | **+0.06** | −0.05 / iter |
+| 定性 gap | +6.33 | +2.92 | −0.08 / iter |
+| 总分 gap | +4.69 | +0.06 | −0.05 / iter |
 
-两个发现**并存**，都要诚实承认：
+A 的优势**递减、不递增**——后半几乎归零。
 
-1. **A 整体确实略占优**（上图蓝线多数落在橙线之上；剔除两个崩溃 iter 17/29 后，定性 gap 均值
-   +4.86）。这支持「**完整 WMC 工作流**（读 calibration + predict-then-execute + 基于它设计
-   candidate）端到端优于零 WMC」——方向与主实验的 control vs WMC 一致。**这一层结论成立。**
+### 4.4 直接按 calibration 厚度分桶（核心检验）
 
-2. **但这个优势随 iter 递减、而非递增**（趋势线斜率为负，后半几乎归零）。这恰好**反驳**了
-   "增益来自累积 calibration 厚度"的假说——厚度一路在涨，gap 却一路在跌。更自洽的解释是：
-   A 的优势来自一个**每轮恒定存在**的因素（candidate-design：自己设计的方案自己更懂），
-   且早期 candidate 改动结构性强、设计者优势最明显；后期多为微调，连白板的 C 也能从 diff digest
-   看懂大概，gap 自然收窄。
+把 24 个 iter 按 A 当时真实看到的 calibration **字符数**三等分：
 
-   关键稳健性：**系统性的 judge 批次偏差只会整体平移曲线、不会制造斜率**，所以"gap 随 iter
-   下降"这个**趋势**结论比"定性绝对差值"更可信，不受 §6 caveat(3) 批次抖动的影响。
+| 厚度桶 | n | 字符范围 | A−C composite | **A−C passrate** | A−C 定性 |
+|---|---|---|---:|---:|---:|
+| 薄 | 8 | 787–9281 | +3.2 | **−3.1** | +6.2 |
+| 中 | 8 | 10566–21809 | +2.9 | **−0.2** | +3.1 |
+| 厚 | 8 | 23467–31387 | +1.0 | **−3.5** | +4.5 |
 
-**小结**：A vs C 说明**端到端 WMC 机制**（含 predict-then-execute 与基于 calibration 的设计）
-整体略有帮助；但"calibration 文本越积越厚 → 预测越来越准"这一条**没有被趋势支持**。
-这与 C vs B 在客观维度打平相互印证：增益来自**机制/纪律**，而非把 calibration 当知识库越攒越值钱。
+- **Spearman(厚度, A−C composite gap) = +0.06**（无相关）
+- **Spearman(厚度, A 的绝对 composite) = −0.05**（厚 calibration 没让 A 更准）
+
+calibration 从 787 字符堆到 3 万字符，A 相对 C 的优势**完全没有变大**；
+客观 passrate 维度上 A 在**三个桶里全是负的**——无论 calibration 多厚，A 都没比 C 准。
+
+---
+
+## 5. 结论
+
+**A 有没有比 C 预测得更准？**
+
+- **客观 passrate 维度：没有**（A−C = −2.25，A 甚至略输；厚薄三个桶全负）。读累积 calibration **没有**让 proposer 的数值预测变准。
+- **定性维度：A 有一点稳定优势**（+4.62，显著）——但这个优势**不随 calibration 变厚而增长**（Spearman ≈ 0、随 iter 斜率为负）。这正是一个**恒定**效应的指纹：A 是 candidate 的**设计者**、天然更懂自己改动的 failure mode，与 calibration 攒了多厚无关。
+
+一个稳健性论据让这个判断更硬：定性维度是盲评，A、C 的分来自不同判官批次，**系统性批次偏差只会整体平移曲线、不会制造"随厚度/iter 下降"的斜率**——而正是这个"平 / 降"的趋势承担了主结论，所以它不受批次抖动影响。
+
+> **累积的 `world_model_calibration.md` 不会让 proposer 把 iteration 结果预测得更准。**
+> 端到端 WMC proposer 整体只是微弱领先，且这点领先在 calibration 厚度上是平的、
+> 在唯一与"谁设计 candidate"无关的客观维度上是缺失的。这与主实验中 WMC 的收益来自
+> **predict-then-execute 的纪律本身**（强制下注 + 对齐 mismatch）、而非把 calibration
+> 当知识库越攒越值钱，是一致的。
 
 ---
 
 ## 6. Caveats
 
-1. **只有 B 带 hindsight**：B 的 LOO calibration 只抹了数字，残留 distill 仍定性引用 iter N；C 什么都没看到，是最干净的一臂。
-2. **B、C 都不设计 candidate**，相对 A 有结构性劣势——所以 C vs A 的定性差距对 C 不利、需谨慎读。
-3. **盲评批次**：A/B 的定性分来自原始判官批次，C 来自同一 rubric 的新批次，跨臂定性 delta 可能含轻微判官批次抖动；但 **passrate 维度是确定性的、三臂完全可比**，主结论建立其上。
-4. **样本量**：n = 24，单 run（LongMemEval-s），单 proposer（kimi-k2.6）。
+1. **同一个模型、同一个固定 candidate**，有意改变的变量是"calibration 空 vs 累积"。A 额外**自己设计了 candidate**，这在定性维度对 A 有利——也正是 A 定性占优的来源。
+2. **passrate 维度是确定性的**；定性维度是盲评，A 与 C 的子分来自不同判官批次，可能有一个恒定的批次偏移——但它无法制造"随厚度/iter 下降"的趋势，而趋势才是承重结论。
+3. **样本量**：n = 24，单 run（LongMemEval-s），单 proposer（kimi-k2.6）。
 
 ---
 
