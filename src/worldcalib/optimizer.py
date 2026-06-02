@@ -1562,27 +1562,42 @@ class LocomoOptimizer:
         return hits[0] if hits else None
 
     def _calib_base_breakdown(
-        self, base_iter: int | None, existing_candidates: list[CandidateResult]
+        self, parsed, existing_candidates: list[CandidateResult]
     ) -> dict:
-        """score_breakdown of the iter the proposer declared it built on.
+        """score_breakdown of the parent the proposer's prediction is measured against.
 
-        Declared `iter_<N>` → that iter's candidate_results; `clean`/absent →
-        the current best-passrate committed candidate (the de-facto parent).
+        Resolution (NOT the current best — that would bias every prediction
+        toward the same reference and is unrelated to what the proposer actually
+        built on):
+          1. declared ``iter_<N>`` → that iter's candidate_results.
+          2. declared ``clean`` OR missing → the iter-0 seed baseline. Under the
+             default policy the editable source is re-baselined from the clean
+             snapshot every iter, so an undeclared/clean candidate genuinely
+             started from the baseline — its true per-type delta is vs iter 0.
         """
         from worldcalib.prediction_feedback import load_score_breakdown
 
-        if base_iter is not None:
+        if getattr(parsed, "base_iter", None) is not None:
             hits = sorted(
-                (self.run_dir / "candidate_results").glob(f"iter{base_iter:03d}*.json")
+                (self.run_dir / "candidate_results").glob(
+                    f"iter{parsed.base_iter:03d}*.json"
+                )
             )
             if hits:
                 return load_score_breakdown(hits[0])
-        scored = [c for c in existing_candidates if c.passrate is not None]
-        if scored:
-            best = max(scored, key=lambda c: c.passrate)
-            p = self._calib_result_path(best)
-            if p:
-                return load_score_breakdown(p)
+        # clean / missing → iter-0 seed baseline (candidate_id without an
+        # "iter" prefix is the seed scaffold loaded from the baseline dir).
+        for c in existing_candidates:
+            cid = getattr(c, "candidate_id", "") or ""
+            if not cid.startswith("iter"):
+                p = self._calib_result_path(c)
+                if p:
+                    return load_score_breakdown(p)
+        if self.config.baseline_dir:
+            bdir = Path(self.config.baseline_dir) / "candidate_results"
+            hits = sorted(bdir.glob("*.json")) if bdir.exists() else []
+            if hits:
+                return load_score_breakdown(hits[0])
         return {}
 
     def _calib_critic_grade(
@@ -1687,10 +1702,11 @@ class LocomoOptimizer:
             if not pred_path.is_file():
                 return
             pred_text = pred_path.read_text(encoding="utf-8")
+            parsed = parse_prediction(pred_text)
+            base_iter = parsed.base_iter
             cand_path = self._calib_result_path(evaluated[0])
             cand_bd = load_score_breakdown(cand_path) if cand_path else {}
-            base_iter = parse_prediction(pred_text).base_iter
-            base_bd = self._calib_base_breakdown(base_iter, existing_candidates)
+            base_bd = self._calib_base_breakdown(parsed, existing_candidates)
             metrics = evaluate_prediction(pred_text, cand_bd, base_bd)
             score, reasoning = self._calib_critic_grade(
                 iteration, pred_text, metrics, workspace_dir
