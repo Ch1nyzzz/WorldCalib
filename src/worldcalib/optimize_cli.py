@@ -199,13 +199,15 @@ def _add_common_optimize_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--proposer-variant",
-        choices=("prose", "critic"),
+        choices=("prose", "critic", "calib"),
         default="prose",
         help=(
             "Proposer world-model variant. 'prose' = append-only "
             "world_model_calibration.md protocol (default). 'critic' = ledger + "
-            "adversarial reference-class critic subagent, no prose calibration file "
-            "(routes to the <benchmark>_critic skill)."
+            "adversarial reference-class critic subagent. 'calib' = prose WMC + a "
+            "two-sided prediction graded after eval by an external critic "
+            "(prediction accuracy becomes an optimized scalar; routes to the "
+            "<benchmark>_calib skill)."
         ),
     )
     parser.add_argument(
