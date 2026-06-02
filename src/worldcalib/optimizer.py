@@ -92,12 +92,6 @@ class OptimizerConfig:
     # wire; overrun candidates that land many minutes late are unsalvageable
     # without defeating the timeout.
     propose_salvage_grace_s: int = 60
-    # calib variant: the external critic that grades the proposer's two-sided
-    # prediction after eval. Empty → resolve from the LongMemEval judge settings
-    # (LME) or the target model (LOCOMO); api key falls back to DEEPSEEK_API_KEY.
-    critic_score_model: str = ""
-    critic_score_base_url: str = ""
-    critic_score_api_key: str = ""
     dry_run: bool = False
     max_context_chars: int = 6000
     max_eval_workers: int = 1
@@ -1591,73 +1585,74 @@ class LocomoOptimizer:
                 return load_score_breakdown(p)
         return {}
 
-    def _critic_score_client(self):
-        """Host-side LLM client for the calib critic grader.
-
-        Prefers the explicit critic_score_* config, then the LongMemEval judge
-        settings, then the target model. Resolves DEEPSEEK_API_KEY from env when
-        the configured key is empty/EMPTY.
-        """
-        import os
-        from worldcalib.model import LocalModelClient
-
-        model = self.config.critic_score_model or getattr(
-            self.config, "judge_model", ""
-        ) or self.config.model
-        base_url = self.config.critic_score_base_url or getattr(
-            self.config, "judge_base_url", ""
-        ) or self.config.base_url
-        key = (
-            self.config.critic_score_api_key
-            or getattr(self.config, "judge_api_key", None)
-            or ""
-        )
-        if not key or key == "EMPTY":
-            key = os.environ.get("DEEPSEEK_API_KEY") or os.environ.get(
-                "LONGMEMEVAL_JUDGE_API_KEY", ""
-            )
-        return LocalModelClient(
-            model=model, base_url=base_url, api_key=key, timeout_s=300,
-            chat_template_kwargs={},
-        )
-
     def _calib_critic_grade(
-        self, iteration: int, prediction_text: str, metrics: dict
+        self,
+        iteration: int,
+        prediction_text: str,
+        metrics: dict,
+        workspace_dir: Path,
     ) -> tuple[float | None, str]:
-        """Ask the critic LLM for a 0–100 prediction-accuracy score + reasoning."""
+        """Grade the prediction with the SAME invocation mode as the proposer.
+
+        The critic is not a host-side API call and not an in-session subagent —
+        it is a fresh, independent agent context spun up exactly like the
+        proposer (same docker kimi sandbox / model / auth via
+        :meth:`_run_proposer_agent` with ``name="critic"``, so no proposer skill
+        is injected). It reads ``critic_input.md`` from its own cwd and writes
+        ``critic_grade.md`` (``SCORE:`` / ``REASONING:``); we read that back.
+        Best-effort — returns ``(None, <note>)`` on any failure.
+        """
         import json as _json
         import re as _re
 
+        critic_cwd = workspace_dir.parent / "critic_grader"
+        try:
+            critic_cwd.mkdir(parents=True, exist_ok=True)
+            (critic_cwd / "critic_input.md").write_text(
+                "# Prediction to grade\n\n"
+                "## proposer prediction.md\n"
+                f"{prediction_text.strip()[:6000]}\n\n"
+                "## measured outcome (mechanical metrics vs declared base)\n"
+                "```json\n"
+                f"{_json.dumps(metrics, ensure_ascii=False, indent=2)[:4000]}\n"
+                "```\n",
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            return None, f"(could not stage critic input: {exc!r})"
+
         prompt = (
-            "You are an independent CALIBRATION critic in an optimization loop. "
-            "A proposer made a TWO-SIDED prediction before its candidate was "
-            "evaluated: which question types it would IMPROVE (Upside) and which "
-            "might REGRESS (Downside). Below is that prediction and the MEASURED "
-            "per-question-type outcome vs the parent it built on. Grade ONLY the "
-            "quality of the prediction (its calibration / world-model), NOT how "
-            "good the patch was.\n\n"
-            "Scoring guidance (0–100): reward naming the types that truly moved "
-            "(both gains AND regressions); penalize SURPRISE regressions (real "
-            "regressions the proposer failed to name) most heavily; do not reward "
-            "vague optimism. A prediction that honestly named a downside that then "
-            "happened is BETTER than one that ignored it.\n\n"
-            f"=== proposer prediction.md ===\n{prediction_text.strip()[:4000]}\n\n"
-            f"=== measured outcome (mechanical metrics) ===\n"
-            f"{_json.dumps(metrics, ensure_ascii=False, indent=2)[:3000]}\n\n"
-            "Respond with EXACTLY:\n"
+            "You are an independent CALIBRATION critic in an optimization loop — "
+            "a fresh context with no stake in the candidate. Read "
+            "`./critic_input.md` in your cwd: it holds a proposer's TWO-SIDED "
+            "prediction (which question types it expected to IMPROVE / might "
+            "REGRESS, relative to a declared base) and the MEASURED "
+            "per-question-type outcome.\n\n"
+            "Grade ONLY the quality of the PREDICTION (its calibration / "
+            "world-model), NOT how good the patch was. Reward naming the types "
+            "that truly moved — gains AND regressions; penalize SURPRISE "
+            "regressions (real regressions it failed to name) most heavily; do "
+            "not reward vague optimism. A prediction that honestly named a "
+            "downside that then happened is BETTER than one that ignored it.\n\n"
+            "Write your verdict to `./critic_grade.md` with EXACTLY this shape:\n"
             "SCORE: <integer 0-100>\n"
             "REASONING: <2-5 sentences: which types it called right, which it "
-            "missed, and the single most important world-model fix for next iter>"
+            "missed, and the single most important world-model fix for next "
+            "iter>\n"
         )
         try:
-            resp = self._critic_score_client().chat(
-                [{"role": "user", "content": prompt}],
-                max_tokens=600,
-                temperature=0.0,
+            result = self._run_proposer_agent(
+                prompt, log_dir=critic_cwd, name="critic", cwd=critic_cwd
             )
-            text = resp.content or ""
         except Exception as exc:  # noqa: BLE001
-            return None, f"(critic LLM call failed: {exc!r})"
+            return None, f"(critic agent invocation failed: {exc!r})"
+
+        text = ""
+        grade_file = critic_cwd / "critic_grade.md"
+        if grade_file.is_file():
+            text = grade_file.read_text(encoding="utf-8")
+        if "SCORE:" not in text:
+            text = getattr(result, "stdout", "") or text
         m = _re.search(r"SCORE:\s*([0-9]+(?:\.[0-9]+)?)", text)
         score = float(m.group(1)) if m else None
         rm = _re.search(r"REASONING:\s*(.+)", text, _re.S)
@@ -1697,7 +1692,9 @@ class LocomoOptimizer:
             base_iter = parse_prediction(pred_text).base_iter
             base_bd = self._calib_base_breakdown(base_iter, existing_candidates)
             metrics = evaluate_prediction(pred_text, cand_bd, base_bd)
-            score, reasoning = self._calib_critic_grade(iteration, pred_text, metrics)
+            score, reasoning = self._calib_critic_grade(
+                iteration, pred_text, metrics, workspace_dir
+            )
 
             fb = self.run_dir / "critic_feedback.md"
             lines = [
