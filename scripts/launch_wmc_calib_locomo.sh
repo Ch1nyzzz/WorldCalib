@@ -46,16 +46,17 @@ BASELINE_LOCOMO_DIR="${BASELINE_LOCOMO_DIR:-runs/baseline_locomo_target_deepseek
 DOCKER_USER_SPEC="${DOCKER_USER_SPEC:-$(id -u):$(id -g)}"
 
 mkdir -p logs runs
-if [ ! -f "${BASELINE_LOCOMO_DIR}/run_summary.json" ]; then
-  printf 'fatal: baseline missing %s/run_summary.json\n' "$BASELINE_LOCOMO_DIR" >&2
-  exit 1
-fi
+# No --baseline-dir: the precomputed locomo baseline was scored before the
+# per-category score_breakdown change, so it only has an "all" bucket. Letting
+# the optimizer evaluate the seed scaffold itself at iter 0 (with the current
+# eval) gives a per-category iter-0 baseline that `clean`-based predictions can
+# be graded against.
 
 run_id="locomo_claudekimi_k26_maxeffort_target_deepseek_v4_flash_calib_iter${ITERATIONS}_${TS}"
 log_path="logs/${run_id}.log"
 status_file="logs/launch_wmc_calib_locomo_${TS}.status"
-printf '[%s] START %s variant=calib iter=%s baseline=%s\n[%s] LOG %s\n' \
-  "$(date -Is)" "$run_id" "$ITERATIONS" "$BASELINE_LOCOMO_DIR" "$(date -Is)" "$log_path" \
+printf '[%s] START %s variant=calib iter=%s baseline=self-eval-iter0\n[%s] LOG %s\n' \
+  "$(date -Is)" "$run_id" "$ITERATIONS" "$(date -Is)" "$log_path" \
   | tee "$status_file"
 
 setsid worldcalib-optimize \
@@ -66,7 +67,6 @@ setsid worldcalib-optimize \
   --no-summary \
   --run-id "$run_id" \
   --out "runs/${run_id}" \
-  --baseline-dir "$BASELINE_LOCOMO_DIR" \
   --iterations "$ITERATIONS" \
   --split train \
   --eval-workers "$EVAL_WORKERS" \
