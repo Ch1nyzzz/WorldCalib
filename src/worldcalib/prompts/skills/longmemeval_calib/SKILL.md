@@ -267,7 +267,7 @@ type.
    ```
    # iter_<THIS> prediction
    ## Candidate (one line)
-   ## Base (which prior iter's stack this builds on — `iter_<N>`, or `clean`)
+   ## Base — REQUIRED: the prior iter whose stack you rebuilt — write `iter_<N>` (exact, e.g. `iter_4`), or `clean` if you built from the baseline. The critic measures your Upside/Downside deltas AGAINST THIS base, so name it accurately — a wrong/missing base makes your whole prediction grade meaningless.
    ## Mechanism (why the change should move the metric)
    ## Upside — question types this should IMPROVE (and why)
    - <qtype>: <why this mechanism helps this type>
