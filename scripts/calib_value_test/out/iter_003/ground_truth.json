@@ -1,0 +1,60 @@
+{
+  "iteration": 3,
+  "candidate_id": "iter003_token_economical_direct_extraction_top8",
+  "actual_passrate": 0.27,
+  "prev_actual_passrate": 0.47,
+  "clusters": {
+    "correct": 27,
+    "empty": 12,
+    "unknown": 52,
+    "wrong": 9
+  },
+  "n_tasks": 100,
+  "avg_prompt_tokens": 1813.4,
+  "avg_completion_tokens": 176.8,
+  "score_breakdown": {
+    "knowledge-update": {
+      "count": 15,
+      "passrate": 0.5333333333333333,
+      "average_score": 0.5333333333333333
+    },
+    "multi-session": {
+      "count": 27,
+      "passrate": 0.2222222222222222,
+      "average_score": 0.2222222222222222
+    },
+    "single-session-assistant": {
+      "count": 11,
+      "passrate": 0.36363636363636365,
+      "average_score": 0.36363636363636365
+    },
+    "single-session-preference": {
+      "count": 4,
+      "passrate": 0.0,
+      "average_score": 0.0
+    },
+    "single-session-user": {
+      "count": 17,
+      "passrate": 0.47058823529411764,
+      "average_score": 0.47058823529411764
+    },
+    "temporal-reasoning": {
+      "count": 26,
+      "passrate": 0.038461538461538464,
+      "average_score": 0.038461538461538464
+    }
+  },
+  "candidate_results_file": "iter003_token_economical_direct_extraction_top8.json",
+  "condition_a_interval": {
+    "delta": [
+      0.06,
+      0.12
+    ],
+    "abs": [
+      0.53,
+      0.59
+    ],
+    "base": 0.47,
+    "raw_line": "passrate Δ: [+0.06, +0.12] (from 0.47 to ~0.53–0.59)"
+  }
+}

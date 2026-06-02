@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 16, "justification": "Actual: empty 4->1(-3), unknown 22->21(-1), wrong 8->9(+1). Pred unknown shrink 3-5 (right dir, overshot); empty shrink 1-2 (right dir, undershot, actual -3); wrong flat/-1 contradicted (+1). Two directions right, magnitudes loose, one wrong."},
+  "trace_movement": {"score": 17, "justification": "Claimed answer-bearing sentences/complete lists surface for failed tasks. Verified all three cited tasks (8aef76bc sealant, 7405e8b1 UberEats, 3249768e Absinthe) flipped fail->pass in iter016 with answer content now present. Specific, data-confirmed."},
+  "side_effects": {"score": 7, "justification": "Predicted slightly LONGER prompts: false, prompts fell 1654.5->1592.4. Empty-increase risk: held (empty fell). Wrong-rise risk hedged: did occur (wrong +1). Main concrete call wrong, one risk correctly flagged."}
+}

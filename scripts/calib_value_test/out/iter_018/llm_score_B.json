@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 13, "justification": "Correct direction on the dominant trend (correct cluster grows, unknown shrinks), but badly mis-sized: predicted unknown shrinks only ~1 task vs actual 81->23 (-58). Wrong-answer call missed: predicted stable ~6, actual 2->10 (grew). Empty ~1 vs actual 3 roughly ok."},
+  "trace_movement": {"score": 13, "justification": "Confirmed: retrieval scores recovered to 0.90+ (top hits 0.96-1.0 vs iter17 0.003-0.62) and prompt tokens ~1558 within predicted 1400-1800. But the specific 8cf51dda-passes/breakthrough claim is contradicted: it scored 0.0 (failed). 2 of 3 verifiable claims hold."},
+  "side_effects": {"score": 9, "justification": "Bounded-budget claim held (no context blowup). Hedged 'could land below 0.65' materialized (actual 0.64). But 'no empty-output spike expected' is a missed regression: empty went 0->3. Prompt length rose far more than the predicted 0-5%."}
+}

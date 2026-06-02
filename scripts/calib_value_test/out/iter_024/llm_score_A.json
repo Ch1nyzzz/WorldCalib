@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 8, "justification": "Prev clusters are null, so no prev->actual delta is verifiable. Actual: correct 62, empty 0, unknown 26, wrong 12. The empty-shrink direction is consistent with empty=0, but wrong/unknown shrink magnitudes (2-4, 1-2) cannot be confirmed against a null baseline. Mostly unverifiable; partial credit for plausible empty call."},
+  "trace_movement": {"score": 7, "justification": "Token-rise (+30-50) and 'fewer truncated lists / more local context' claims have no prev token baseline (None) to verify against. Actual avg prompt 1503.5, completion 199.8. Claims are qualitative span assertions, unconfirmed and unfalsifiable here. Conservative partial credit for plausibility only."},
+  "side_effects": {"score": 7, "justification": "Flags prompt-token rise (unverifiable, no prev) and predicts no regression. With null prev clusters and 0.62 passrate, no regression is measurable either way. Reasoning that mechanism only alters retained sentences is plausible; empty=0 supports no empty-output regression. Mild credit, no confirmable risk call."}
+}

@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 8, "justification": "Headline bet wrong: predicted unknown shrink 3-5, but unknown GREW 18->22 (+4). Wrong cluster: predicted -1/-2, actual -4 (correct direction, magnitude underestimated). Empty predicted 0-3, actual flat 4 (fine). One correct, one reversed-direction on the primary claim."},
+  "trace_movement": {"score": 7, "justification": "10d9b85a flipped to pass, consistent with relevant doc surfacing (one confirmed). But explicit claims that 3249768e and 8aef76bc top hits would contain complete list/sealant info are contradicted: both remained failed. 21adecb5 also still failed. Net 1 confirmed, 2 contradicted."},
+  "side_effects": {"score": 5, "justification": "Predicted slightly longer prompts; actual prompt tokens flat/down (1656->1654). 'Low regression risk' call undercut: 4 tasks regressed to fail (offsetting 4 gains, net passrate flat). False-alarm-free on timeouts but missed the regression magnitude."}
+}

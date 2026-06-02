@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 4, "justification": "All three cluster directions contradicted. Predicted unknown shrink 2-4; actual GREW +5 (29->34). Predicted empty flat ~3-5; actual rose +4 (6->10). Predicted wrong flat/+1; actual fell -3 (12->9). Correct -6. Only minor partial credit: wrong-cluster magnitude was small as implied."},
+  "trace_movement": {"score": 14, "justification": "Confirmed: full cocktail list '1. Gin ... 5. Triple Sec' with ~10-word truncated headings present; ** peak highlighting present in retrieved. These concrete claims verified. But token sub-claim wrong/confused: said ~1600 'lower than iter_010 ~1540'; actual prompt tokens ROSE 1354->1504, iter_010 was 1354 not 1540."},
+  "side_effects": {"score": 5, "justification": "Predicted low regression risk and token similar/lower; both wrong — a clear regression occurred (passrate -0.06, unknown +5, empty +4) and prompt tokens rose +150. Partial credit: falsification anticipated 'expanding list-bearing hits dropping other evidence,' the failure mode that materialized."}
+}

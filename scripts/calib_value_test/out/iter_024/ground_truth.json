@@ -1,0 +1,60 @@
+{
+  "iteration": 24,
+  "candidate_id": "iter024_dynamic_contiguous_compression_top8_top8",
+  "actual_passrate": 0.62,
+  "prev_actual_passrate": null,
+  "clusters": {
+    "correct": 62,
+    "empty": 0,
+    "unknown": 26,
+    "wrong": 12
+  },
+  "n_tasks": 100,
+  "avg_prompt_tokens": 1503.5,
+  "avg_completion_tokens": 199.8,
+  "score_breakdown": {
+    "knowledge-update": {
+      "count": 15,
+      "passrate": 0.6,
+      "average_score": 0.6
+    },
+    "multi-session": {
+      "count": 27,
+      "passrate": 0.48148148148148145,
+      "average_score": 0.48148148148148145
+    },
+    "single-session-assistant": {
+      "count": 11,
+      "passrate": 0.9090909090909091,
+      "average_score": 0.9090909090909091
+    },
+    "single-session-preference": {
+      "count": 4,
+      "passrate": 0.0,
+      "average_score": 0.0
+    },
+    "single-session-user": {
+      "count": 17,
+      "passrate": 0.9411764705882353,
+      "average_score": 0.9411764705882353
+    },
+    "temporal-reasoning": {
+      "count": 26,
+      "passrate": 0.5384615384615384,
+      "average_score": 0.5384615384615384
+    }
+  },
+  "candidate_results_file": "iter024_dynamic_contiguous_compression_top8_top8.json",
+  "condition_a_interval": {
+    "delta": [
+      0.02,
+      0.06
+    ],
+    "abs": [
+      0.71,
+      0.75
+    ],
+    "base": 0.69,
+    "raw_line": "passrate Δ: [+0.02, +0.06] (from 0.69 to ~0.71–0.75)"
+  }
+}

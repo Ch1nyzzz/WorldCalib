@@ -1,0 +1,60 @@
+{
+  "iteration": 29,
+  "candidate_id": "iter029_temporal_date_boost_top8",
+  "actual_passrate": 0.11,
+  "prev_actual_passrate": 0.68,
+  "clusters": {
+    "correct": 11,
+    "empty": 81,
+    "unknown": 7,
+    "wrong": 1
+  },
+  "n_tasks": 100,
+  "avg_prompt_tokens": 295.7,
+  "avg_completion_tokens": 28.8,
+  "score_breakdown": {
+    "all": {
+      "count": 81,
+      "passrate": 0.0,
+      "average_score": 0.0
+    },
+    "knowledge-update": {
+      "count": 2,
+      "passrate": 1.0,
+      "average_score": 1.0
+    },
+    "multi-session": {
+      "count": 5,
+      "passrate": 0.2,
+      "average_score": 0.2
+    },
+    "single-session-assistant": {
+      "count": 4,
+      "passrate": 1.0,
+      "average_score": 1.0
+    },
+    "single-session-user": {
+      "count": 1,
+      "passrate": 1.0,
+      "average_score": 1.0
+    },
+    "temporal-reasoning": {
+      "count": 7,
+      "passrate": 0.42857142857142855,
+      "average_score": 0.42857142857142855
+    }
+  },
+  "candidate_results_file": "iter029_temporal_date_boost_top8.json",
+  "condition_a_interval": {
+    "delta": [
+      0.01,
+      0.03
+    ],
+    "abs": [
+      0.72,
+      0.74
+    ],
+    "base": 0.71,
+    "raw_line": "passrate Δ: [+0.01, +0.03] from 0.71 to ~0.72–0.74"
+  }
+}

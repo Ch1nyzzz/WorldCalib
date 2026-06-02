@@ -1,0 +1,6 @@
+# Heavy / transient / secret-bearing artifacts — keep only code + small outputs.
+out/*/agent_*/
+out/*.log
+out/rerun_*.log
+# Staged scratch workspaces live under runs/_calib_value_test (runs/ is already
+# gitignored at repo root); nothing here, but documented for clarity.

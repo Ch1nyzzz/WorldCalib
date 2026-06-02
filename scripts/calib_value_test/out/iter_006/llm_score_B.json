@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 9, "justification": "Empty (3, predicted 2-4) and wrong (9, predicted 5-10) bands correct. But core claim 'unknown fails to shrink' is contradicted: unknown fell 48->38 (-10) and correct rose 39->50 (+11). Prediction implied stagnation; actual was a strong improvement. Right final bands, wrong direction on the key movement."},
+  "trace_movement": {"score": 11, "justification": "Confirmed: prompt mean 1448.5 in 1400-1600 range; completions all <=512, mean 170.9 ('well under for most'). Contradicted: both named still-failing tasks 8cf51dda and 3249768e actually PASSED. ~2 of 4 verifiable claims hold."},
+  "side_effects": {"score": 5, "justification": "Correct: no context-budget exhaustion. But central risk thesis—'synthesis-permissive prompt does not reduce abstention; unknown persists as retrieval is binding'—is contradicted: unknown shrank -10, passrate rose to 0.5. Missed the actual gain. 'No significant token change' also slightly off (prompt +130)."}
+}

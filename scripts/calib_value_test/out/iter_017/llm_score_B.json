@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 13, "justification": "Correctly nailed the dominant move: unknown grows sharply (21->81), the right direction though magnitude understated (~40-55 vs 81). But empty predicted ~2-5 (rose) actually 0, and wrong predicted rising to ~10-15 actually shrank 9->2 (wrong direction). One strong call, two contradicted."},
+  "trace_movement": {"score": 7, "justification": "top_k=16 second retrieval confirmed (retrieved lens ~16; 5 tasks >16 show retry firing) and second LLM call plausible. But the prediction's framing implied higher token usage; actual prompt 1592->916 and completion 214->107 both fell ~42%, contradicting the trace-cost narrative."},
+  "side_effects": {"score": 3, "justification": "Headline risk 'tokens rise 25-40%' was a clear false alarm: tokens dropped ~42%. The substring-retry regression mechanism barely fired (5 retries) and did not explain the real collapse (correct 69->17). The genuine large regression went largely unattributed."}
+}

@@ -1,0 +1,17 @@
+{
+  "score": 2.5,
+  "coverage": 2.5,
+  "sharpness": 0.0,
+  "covered": false,
+  "interval": [
+    0.36,
+    0.41
+  ],
+  "actual": 0.5,
+  "width": 0.05,
+  "parsed_delta": [
+    0.03,
+    0.02
+  ],
+  "parsed_raw_line": "passrate Δ: [−0.03, +0.02] from iter_005's 0.39 baseline, staying flat at ~0.36–0.41. The mechanism does not recover iter_004's 0.49 level."
+}

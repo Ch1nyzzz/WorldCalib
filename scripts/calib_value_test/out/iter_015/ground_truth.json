@@ -1,0 +1,60 @@
+{
+  "iteration": 15,
+  "candidate_id": "iter015_multisignal_retrieval_without_answer_boosting_top8",
+  "actual_passrate": 0.66,
+  "prev_actual_passrate": 0.66,
+  "clusters": {
+    "correct": 66,
+    "empty": 4,
+    "unknown": 22,
+    "wrong": 8
+  },
+  "n_tasks": 100,
+  "avg_prompt_tokens": 1654.5,
+  "avg_completion_tokens": 220.7,
+  "score_breakdown": {
+    "knowledge-update": {
+      "count": 15,
+      "passrate": 0.8666666666666667,
+      "average_score": 0.8666666666666667
+    },
+    "multi-session": {
+      "count": 27,
+      "passrate": 0.6296296296296297,
+      "average_score": 0.6296296296296297
+    },
+    "single-session-assistant": {
+      "count": 11,
+      "passrate": 0.6363636363636364,
+      "average_score": 0.6363636363636364
+    },
+    "single-session-preference": {
+      "count": 4,
+      "passrate": 0.25,
+      "average_score": 0.25
+    },
+    "single-session-user": {
+      "count": 17,
+      "passrate": 0.9411764705882353,
+      "average_score": 0.9411764705882353
+    },
+    "temporal-reasoning": {
+      "count": 26,
+      "passrate": 0.46153846153846156,
+      "average_score": 0.46153846153846156
+    }
+  },
+  "candidate_results_file": "iter015_multisignal_retrieval_without_answer_boosting_top8.json",
+  "condition_a_interval": {
+    "delta": [
+      0.03,
+      0.08
+    ],
+    "abs": [
+      0.69,
+      0.74
+    ],
+    "base": null,
+    "raw_line": "passrate Δ: [+0.03, +0.08] (to ~0.69–0.74)"
+  }
+}

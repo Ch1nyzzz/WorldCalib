@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 20, "justification": "Unknown predicted drop 3-6; actual -8 (correct dir, slight underestimate). Wrong +1-2 predicted, actual +1 (exact). Correct grows implied, +6. Empty predicted stay 0-2 but actual +1 to 3, minor miss. Strong directional accuracy, mostly right magnitudes."},
+  "trace_movement": {"score": 18, "justification": "Retrieved-count rise 'avg > 15' confirmed: 15.1->49.5. Prompt tokens '+10-20%' confirmed at +13% (1460.7->1651.5). Compression/budget claims plausible and consistent. Nearly all verifiable claims confirmed; minor lack of specificity on exact magnitude."},
+  "side_effects": {"score": 13, "justification": "Prompt-token rise ~10-20% flagged and held (+13%). Empty-above-4 risk correctly bounded; actual 3 stayed below 4. No regression occurred where flagged; multi-turn split risk did not materialize. Calibrated, accurate risk calls; no false alarms."}
+}

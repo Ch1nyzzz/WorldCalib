@@ -1,0 +1,60 @@
+{
+  "iteration": 8,
+  "candidate_id": "iter008_keyword_augmented_dual_pass_retrieval_top8",
+  "actual_passrate": 0.53,
+  "prev_actual_passrate": null,
+  "clusters": {
+    "correct": 53,
+    "empty": 11,
+    "unknown": 26,
+    "wrong": 10
+  },
+  "n_tasks": 100,
+  "avg_prompt_tokens": 1588.1,
+  "avg_completion_tokens": 205.4,
+  "score_breakdown": {
+    "knowledge-update": {
+      "count": 15,
+      "passrate": 0.8,
+      "average_score": 0.8
+    },
+    "multi-session": {
+      "count": 27,
+      "passrate": 0.4074074074074074,
+      "average_score": 0.4074074074074074
+    },
+    "single-session-assistant": {
+      "count": 11,
+      "passrate": 0.7272727272727273,
+      "average_score": 0.7272727272727273
+    },
+    "single-session-preference": {
+      "count": 4,
+      "passrate": 0.0,
+      "average_score": 0.0
+    },
+    "single-session-user": {
+      "count": 17,
+      "passrate": 0.8235294117647058,
+      "average_score": 0.8235294117647058
+    },
+    "temporal-reasoning": {
+      "count": 26,
+      "passrate": 0.3076923076923077,
+      "average_score": 0.3076923076923077
+    }
+  },
+  "candidate_results_file": "iter008_keyword_augmented_dual_pass_retrieval_top8.json",
+  "condition_a_interval": {
+    "delta": [
+      0.05,
+      0.12
+    ],
+    "abs": [
+      0.55,
+      0.62
+    ],
+    "base": null,
+    "raw_line": "passrate Δ: [+0.05, +0.12] (to ~0.55–0.62)"
+  }
+}

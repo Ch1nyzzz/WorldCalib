@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 6, "justification": "Unknown direction right (21->17, claimed modest shrink). But the central claim wrong stays flat/+1 was badly contradicted: wrong rose 8->15 (+7). All three named aggregation tasks (129d1232, 2f91af09, 10d9b85a) stayed failed, refuting the 2-4 shrink. Correct fell 71->68."},
+  "trace_movement": {"score": 6, "justification": "Token rise claim directionally ok (prompt 1594.3->1607.1, +13). Heterogeneous top-hits unverifiable/plausible, no full credit. Key claim breakthroughs outnumber regressions is contradicted: 0 breakthroughs vs 3 regressions. Completion tokens fell 236.4->201.8, unpredicted."},
+  "side_effects": {"score": 5, "justification": "Empty-output-minimal call held (empty=0). Slight token rise held. But flagged substring-bug regression as low risk while 3 regressions actually occurred, and entirely missed the large wrong-answer surge (+7). Net under-warned the realized regression."}
+}

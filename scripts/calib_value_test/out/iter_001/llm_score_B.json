@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 11, "justification": "No prev baseline existed (iter0 null), so claimed deltas rest on invented priors. Directionally: unknown predicted to shrink (actual 33) and wrong to rise modestly to 5-10 (actual 4, near). But 'retrieval-miss flat ~40' maps poorly to empty=25, and magnitudes are loose. Partial credit."},
+  "trace_movement": {"score": 4, "justification": "Core claim '5-7 hits in prompt vs baseline 2-3' is contradicted: actual avg 18.6 hits (14-20). 'Fewer unknown outputs/more direct answers' unverifiable without baseline; 38 preds still contain 'unknown'. Most verifiable claims wrong."},
+  "side_effects": {"score": 3, "justification": "Load-bearing call 'empty/truncated outputs remain rare (<5 tasks)' badly contradicted: actual empty=25, a major missed regression the prediction explicitly dismissed. Completion-token 'rise slightly' unverifiable (no baseline). False reassurance dominates."}
+}

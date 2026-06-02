@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 11, "justification": "Empty correct: predicted shrink 10->3-5 vs actual 11->8 (right dir, slightly overshot). Unknown contradicted: predicted shrink ~21->15-18 but actual 26->32 grew +6. Wrong contradicted: predicted flat/+1-2 but actual 10->6 shrank. One of three movements right."},
+  "trace_movement": {"score": 13, "justification": "Confirmed: prompt shorter 1588.1->1523.6 and completion drop 205.4->166.8 (empty 11->8). But 'Relevant excerpts' block and inline-provenance span claims are unverifiable—artifacts store no assembled prompt. Two verifiable claims confirmed; span claims credited conservatively."},
+  "side_effects": {"score": 9, "justification": "Flagged prompt-token rise (>150) as risk—actual fell ~64, false alarm but hedged as 'may rise slightly'. Temporal-reasoning regression risk flagged—actual 8/26->9/26 held/improved, correctly no regression. No major regression occurred or was missed; mixed calibration."}
+}

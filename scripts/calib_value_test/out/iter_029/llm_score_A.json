@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 4, "justification": "Missed the dominant event: empty 0->81. Predicted unknown drops 'slightly' (actual -10, ok direction) and wrong flat/-1 (actual -14, direction ok, magnitude far off). Did not foresee correct collapse 68->11. Minor directional credit only."},
+  "trace_movement": {"score": 2, "justification": "Claimed prompt length and completion patterns unchanged and tokens flat; actual prompt 1607->296, completion 202->29 collapsed (81 zero-token crashes). Core verifiable trace claims contradicted. Temporal-hit claim moot/unverifiable."},
+  "side_effects": {"score": 1, "justification": "Explicitly asserted 'No risk of empty outputs because prompt is unchanged'; empty exploded to 81 via KeyError:'choices' runtime crash. Direct false-negative on the realized regression; only listed empty reappearance as a non-applicable falsification."}
+}

@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 19, "justification": "Empty 10->2 nailed (predicted 2-4). Wrong predicted flat/+1, actual 9->8 (essentially flat, ok). Unknown predicted -3..-6 but actual 34->33 (only -1), magnitude overstated. Correct 47->57 unstated but implied by empty drop. Strong on dominant cluster, weak on unknown."},
+  "trace_movement": {"score": 11, "justification": "Avg completion rose 187->233 (confirmed). Bimodal partly: 50 short(<=150) but long tail mostly 150-400, only 14>=400; the 2 empty preds hit 1024 cap (hidden thinking did NOT finish). '**/list-skeleton disappear' unverifiable: raw retrieved identical (619 ** hits both iters), formatted context not stored."},
+  "side_effects": {"score": 8, "justification": "Token-rise claim mixed: completion rose but prompt FELL 1504->1460. Tier-2-truncation regression risk: unknown stayed flat (33), wrong fell, no regression materialized. Hidden-thinking-truncation concern validated by two 1024-capped empty preds. Reasonable but partly miscalled direction."}
+}

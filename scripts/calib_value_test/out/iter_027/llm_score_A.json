@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 13, "justification": "Prev clusters null, no baseline deltas. Empty cluster predicted to shrink; actual empty=0, directionally consistent (21adecb5 now passes). But named aggregation persistent-fails 129d1232 and 10d9b85a both still fail, contradicting the scattered-evidence-shrinks claim. Mixed: one right, one wrong."},
+  "trace_movement": {"score": 11, "justification": "Token-rise claim 'only for tasks using >1536' confirmed: only 2/100 exceed 1536, max completion 1807, none reach 2048. Heterogeneous-top-hit and breakthrough>regression claims are unverifiable without prior baseline; judged plausible but not confirmable. Partial credit."},
+  "side_effects": {"score": 9, "justification": "Modest token rise correct (only 2 tasks >1536). Wrong-answer 'should not increase' plausibly held (wrong=8, low) but no prior baseline to confirm. Qwen3-thinking low-risk call consistent with empty=0. Reasonable risk calls, none falsified, but unverifiable against baseline."}
+}

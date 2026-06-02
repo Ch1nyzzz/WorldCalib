@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 4, "justification": "All three directional claims are wrong. Predicted unknown shrink 4-8, but it grew 29->34 (+5). Predicted empty stay 3-5, but it grew to 10. Predicted wrong flat/+1-2, but it fell 12->9 (-3). Only credit: correctly named abstain/unknown as the dominant family. Essentially contradicted."},
+  "trace_movement": {"score": 14, "justification": "Confirmed: ** highlighting present in all 100 retrieved blocks; numbered list content present in all. Token claim ~160k roughly matches 150k total but framed as staying similar/aggressive while avg prompt actually rose 1354->1504. Most verifiable trace claims confirmed; token framing slightly off."},
+  "side_effects": {"score": 9, "justification": "Correctly flagged regression risk from over-aggressive list-skeleton truncation dropping disambiguating description; passrate did regress 0.53->0.47. But predicted token stays ~similar while prompt tokens rose ~11% (135k->150k), and its own >5-empty falsification trigger fired (empty=10) yet was framed only as a watch-item."}
+}

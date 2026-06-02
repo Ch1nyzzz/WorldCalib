@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 7, "justification": "Headline directions mostly wrong: predicted correct grow (passrate +0.01..+0.03) but correct fell 64->61 and passrate -0.03; predicted unknown flat/shrink yet unknown rose 23->26. Wrong ~flat (10->11) and empty (3->2~1) were close, and 8cf51dda did flip to pass, but net cluster movement was opposite."},
+  "trace_movement": {"score": 12, "justification": "8cf51dda trace confirmed: full 3-objective list block now retrieved (objectives present, prediction passes). Compact-block claim plausible. But 'prompt length match iter_016' unverifiable and prompt tokens actually rose vs iter_018 (1558.5->1592.6); completion ~flat (224->220). Roughly half verifiable, half unconfirmed."},
+  "side_effects": {"score": 8, "justification": "Correctly flagged context-loss-from-extraction mechanism and param-integrity risk; empty stayed near baseline (no prompt/param blowup, held). But predicted only 0-1 collateral tasks while net correct fell 3 and unknown grew 3, so the regression magnitude was understated. Partial credit."}
+}

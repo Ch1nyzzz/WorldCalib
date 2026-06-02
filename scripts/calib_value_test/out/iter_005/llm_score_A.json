@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 6, "justification": "Predicted unknown/empty shrink 4-8; actual: empty 7->3 (-4, correct) but unknown 34->48 (+14, wrong direction, dominant cluster). Wrong stable 10->10 (correct). Correct predicted to grow but fell 49->39. Mostly contradicted on the largest cluster."},
+  "trace_movement": {"score": 3, "justification": "Enumeration phrases predicted to rise: only 1/100 preds show them. Completion tokens predicted stable but fell 162.9->149.8. Prompt tokens predicted +5-15% but fell 1408.7->1318.9. All token-direction claims contradicted; enumeration claim unconfirmed."},
+  "side_effects": {"score": 5, "justification": "Flagged list-bloat/irrelevant-inclusion and budget-exhaustion risks; falsification note correctly anticipated sub-0.50 = noise hurts (passrate fell to 0.39). But main prediction expected improvement and missed the actual -0.10 regression. Partial credit for the hedged risk call."}
+}

@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 15, "justification": "Actual deltas: correct +8, unknown -6, wrong -4, empty +2. Predicted unknown shrink 2-4 (right direction, undershot the -6). Wrong 'flat or +1' held but actually fell -4 (improvement unforeseen). 8cf51dda 'should convert to pass' false premise: it already passed 19->20. Empty implicitly flat but rose +2."},
+  "trace_movement": {"score": 9, "justification": "Tokens essentially flat (prompt 1592.6->1600.6, completion 220.2->221.4), consistent with 'prompt complexity unchanged'. List-item/date-bearing 'appear higher in compressed text' claims are unverifiable span assertions, plausible and consistent but not confirmable; judged conservatively, partial credit only."},
+  "side_effects": {"score": 6, "justification": "Key call 'empty predictions should not increase' contradicted: empty rose 2->4. 'Wrong should not rise by >1' held (fell -4). Answer-type misleading-evidence risk did not clearly manifest (wrong improved). One correct guard, one falsified guard."}
+}

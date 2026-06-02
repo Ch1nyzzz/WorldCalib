@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 2, "justification": "Predicted unknown shrinks 3-5; it exploded +60 (21->81). Predicted correct stable/up; it collapsed 69->17. Wrong predicted flat/+1; actually fell 9->2. Empty ~1 vs actual 0 is the only near-hit. Direction wrong on the dominant cluster."},
+  "trace_movement": {"score": 1, "justification": "Predicted token consumption +20-25% from second calls; actual prompt 1592->916 and completion 215->107, both fell ~42%. Predicted doubled retrieval pool (16+16); actual retrieved count fell 49->16. Every verifiable trace claim contradicted."},
+  "side_effects": {"score": 1, "justification": "Predicted regression risk was hallucination from noisy retrieval; actual catastrophic regression (passrate 0.69->0.17) came from mass abstention, opposite direction. Predicted +0.03/+0.06 improvement. The real failure mode was missed; no correct risk call."}
+}

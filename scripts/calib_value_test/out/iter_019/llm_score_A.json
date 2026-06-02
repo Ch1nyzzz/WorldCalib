@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 9, "justification": "Correctly predicted 8cf51dda fail->pass (verified). But claimed unknown shrinks 0-1; actual unknown grew 23->26 (+3), wrong-direction. Predicted correct cluster up (+0.01-0.03); actual correct fell 64->61. Wrong predicted flat ~6 but was 11 (+1). Empty 3->2 roughly right."},
+  "trace_movement": {"score": 14, "justification": "Confirmed: 8cf51dda compressed context now yields all three objectives vs two prior (verified in raw predictions). But 'no prompt-length change' is mildly contradicted: avg prompt rose 1558.5->1592.6 (+34). Completion ~flat (224->220). One strong verified claim, one partly off."},
+  "side_effects": {"score": 10, "justification": "Flagged wrong-answers could rise from list-block displacing prose; wrong did rise 10->11, directionally correct. Predicted empty would not increase; held (3->2). No false alarms. Missed that unknown/abstain would climb and overall passrate would regress, slightly weakening risk coverage."}
+}

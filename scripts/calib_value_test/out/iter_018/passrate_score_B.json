@@ -1,0 +1,17 @@
+{
+  "score": 17.5,
+  "coverage": 17.5,
+  "sharpness": 0.0,
+  "covered": false,
+  "interval": [
+    0.67,
+    0.71
+  ],
+  "actual": 0.64,
+  "width": 0.04,
+  "parsed_delta": [
+    0.5,
+    0.54
+  ],
+  "parsed_raw_line": "passrate Δ: [+0.50, +0.54] from iter_017's 0.17, to an absolute ~0.67–0.71. The central estimate is ~0.70 (restoring iter_016's 69 passes and recovering the one known regression 8cf51dda)."
+}

@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 21, "justification": "Empty 10->2: predicted 3-5, right direction/large-drop band, slightly understated drop. 4 named recoveries (60bf93ed,85fa3a3f,1916e0ea,74aed68e) all confirmed passing. Unknown 34->33 (predicted -2..-4, dir right, overstated). Wrong 9->8 (predicted flat/+1, actually fell, mild miss). Correct grows as implied."},
+  "trace_movement": {"score": 13, "justification": "Empty predictions decreased significantly: confirmed 10->2. Completion tokens rose 187->233, confirming the 1024-budget claim. But predicted prompt-token RISE is contradicted: prompt fell 1504->1461, so larger Tier-1 budget claim wrong. ** / skeleton-removal unverified, plausible. Mixed verifiable claims."},
+  "side_effects": {"score": 10, "justification": "Token-rise flag partly correct (completion up, prompt down). Flagged Tier-2 truncation / answer-signal misprioritization regression risk; wrong-count actually fell 9->8 so no net regression materialized, validating the implicit 'should not regress' hold. No clear missed regression; one false-alarm-ish risk that didn't fire."}
+}

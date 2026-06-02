@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 6, "justification": "Wrong cluster predicted to SHRINK 2-4 but actually GREW 8->15 (+7) — main claim badly contradicted; named tasks (10d9b85a,a08a253f,852ce960,2f91af09,129d1232) all stayed failed. Unknown predicted flat/-1..2; actually -4 (right direction, magnitude understated). Empty correctly flat."},
+  "trace_movement": {"score": 8, "justification": "Token-rise claim confirmed: prompt tokens 1594.3->1607.1 (+12.8). But completion tokens actually fell 236.4->201.8, opposite of more 'combining language'. Diverse-top-hit and combining-language span claims unverifiable; judged conservatively."},
+  "side_effects": {"score": 4, "justification": "Empty-stays-0 held (correct). But explicit 'wrong-answer count should not rise' was violated: +7, exceeding its own >2 falsification trigger. Predicted passrate +0.01..+0.03; actual -0.03 regression missed. Net poor risk calibration."}
+}

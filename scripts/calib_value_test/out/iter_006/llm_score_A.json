@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 22, "justification": "Actual deltas: correct +11, empty 0, unknown -10, wrong -1. Predicted unknown/empty shrink by 6-10 (actual -10, right at boundary), wrong stable/slight shrink (actual -1), implied correct grows. All directions correct, unknown magnitude band exact."},
+  "trace_movement": {"score": 8, "justification": "Prompt tokens predicted 'stable or slightly lower' but actually rose 1318.9->1448.5 (+10%): contradicted. Completion 'stable ~100-250' but rose 149.8->170.9 and only 41/100 in range. Synthesized-values claim unverifiable, conservative partial."},
+  "side_effects": {"score": 9, "justification": "'No regressions' largely held: all clusters improved/flat, passrate 0.39->0.5. But 'context bloat prevented' undercut by prompt tokens rising +130. Hallucination and start/end-miss risks flagged but no clear regression materialized; calls reasonable."}
+}

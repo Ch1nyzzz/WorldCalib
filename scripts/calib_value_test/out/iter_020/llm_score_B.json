@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 11, "justification": "Unknown shrink direction right (predicted -2..-4, actual -6, near band). But 8cf51dda 'fail->pass' is contradicted: it already passed in iter19. Wrong predicted flat/+1 yet actually dropped 11->7. Empty predicted flat ~1 but rose 2->4, a missed regression."},
+  "trace_movement": {"score": 6, "justification": "Token-flat claim confirmed (1592.6->1600.6, 220.2->221.4). But cited 8cf51dda trace claim rests on false fail premise; 7405e8b1 still failed ('unknown'), so the claim that buried quantitative/temporal sentences now surface is unconfirmed for its own example."},
+  "side_effects": {"score": 7, "justification": "Token-unchanged call confirmed. 'No-regression on wrong-answer synthesis' held (wrong dropped 11->7). But the explicit claim that empty-output risk should not increase is contradicted: empty predictions rose 2->4, a regression the prediction missed."}
+}

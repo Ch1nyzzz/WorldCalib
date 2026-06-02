@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 19, "justification": "Unknown shrink predicted 3-5, actual -7 (right direction, slightly under band). Wrong predicted +0-1, actual +3 (right direction, underestimated). Empty predicted 0-3, actual +1 to 4 (just outside). Correct +3 implied. All directions correct, magnitudes near."},
+  "trace_movement": {"score": 11, "justification": "Prompt tokens predicted ~+5%; actual only +4.9 (+0.3%), large overestimate. Unknown->phrase shift consistent with -7 unknown delta but named tasks (3249768e/8aef76bc) absent from set, unverifiable. Missed completion-token rise (+30.7, 208->239)."},
+  "side_effects": {"score": 8, "justification": "Correctly held: empty stayed <=5 (4), no crowd-out regression (passrate +0.03). But called wrong-answer risk only 0-1 / low; wrong actually rose +3, an under-called regression. Token-rise flag was directionally right yet magnitude overstated."}
+}

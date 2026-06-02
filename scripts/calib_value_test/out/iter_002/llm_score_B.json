@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 21, "justification": "All directions correct: empty 25->18 (predicted shrink to 10-15, slightly under-shrunk), unknown 33->29 modest shrink (matched), wrong 4->6 (+2, exactly matched flat-to-+2). Correct cluster implied to grow, did (38->47). Strong direction/magnitude alignment."},
+  "trace_movement": {"score": 4, "justification": "Two main claims contradicted: retrieved docs unchanged (18.6 both iters, not 2-3->4-6); completion tokens fell 168.6->148.7 with max still 256 and zero in 300-450 (512 cap never took effect), opposite of predicted rise. Prompt-flat claim wrong: dropped 1637->1478."},
+  "side_effects": {"score": 9, "justification": "Core/summary regression risk reasonable (wrong rose only +2, mild). '512 may be insufficient, empty above ~15 needs higher budget' call was apt: empty stayed 18 (>15) and budget never effectively rose. No false alarms; risks plausible and partly confirmed."}
+}

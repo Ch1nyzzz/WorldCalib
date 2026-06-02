@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 13, "justification": "Prev(7) clusters null, so no true deltas; pred anchored on iter_006. Empty-growth mechanism strongly right (empty=11, all at 512-tok cap). But pred said unknown shrinks to small while wrong grows; actual unknown=26 stayed the dominant family and wrong=10 is smallest non-correct cluster, partly contradicting the abstention-reduction thesis."},
+  "trace_movement": {"score": 16, "justification": "** ** focal markers confirmed in all 100 compressed retrieved hits; empty completions with 512-token budget cap confirmed (11 tasks), matching reasoning_content/hidden-thinking fallback claim. 'Additional docs surfacing in top-8' is plausible but unverifiable (no prev results=None). Most verifiable claims confirmed; one unverifiable."},
+  "side_effects": {"score": 9, "justification": "Call (b)—** highlighting triggers hidden-thinking truncation despite 512 budget—strongly confirmed: 11 empties all at 512-tok cap. Calls (a) tier-sort demoting core memory and (c) softening turning abstains into wrong answers are unverifiable with no prev baseline. One solid hit, two unconfirmed."}
+}

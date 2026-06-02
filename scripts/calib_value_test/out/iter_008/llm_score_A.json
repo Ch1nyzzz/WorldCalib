@@ -1,0 +1,5 @@
+{
+  "failure_movement": {"score": 9, "justification": "Prev iter7 clusters are null, so no prev->actual delta exists to confirm shrink/grow claims. Prediction anchors to iter_006 (~50 fail) not the recorded prev. Actual: empty11/unknown26/wrong10/correct53. 'Wrong flat or slight increase' is the only checkable claim and wrong=10 is plausibly low; unknown=26 still large. Vague, mostly unverifiable: partial credit."},
+  "trace_movement": {"score": 9, "justification": "Two trace claims. Focal '** **' highlighting confirmed: 619/1505 hits contain ** markers. But 'spans show dual-query fusion in metadata' is NOT confirmed: search_mode only shows 'bm25+semantic', no rrf/dual/stopword fusion marker. Token-rise claim unverifiable (no prev baseline). ~one of two checkable claims confirmed."},
+  "side_effects": {"score": 7, "justification": "Completion-stable and wrong-count-flat/slight-rise: wrong=10 is low, consistent, no regression evident. But no prev baseline confirms completion (205) or prompt (1588) stability. Negation-regression risk on stopword removal is plausible but unverifiable. Reasonable, hedged risk calls, no false alarm: partial credit."}
+}

@@ -1,0 +1,17 @@
+{
+  "score": 37.0,
+  "coverage": 25.0,
+  "sharpness": 12.0,
+  "covered": true,
+  "interval": [
+    0.49,
+    0.53
+  ],
+  "actual": 0.49,
+  "width": 0.04,
+  "parsed_delta": [
+    0.22,
+    0.26
+  ],
+  "parsed_raw_line": "passrate Δ: [+0.22, +0.26] (from iter_003's 0.27 to ~0.49–0.53). Restoring iter_002's retrieval fixes the 6 regressions and recovers the 0.47 baseline. The 512-token budget and reasoning_content fallback should convert 3–5 of iter_002's 14 empty predictions to passes. Query compression adds a modest +2–4 breakthroughs from persistent fails by fitting more hits in context, while risking 1–3 regressions from destroyed list structure or dropped context."
+}
