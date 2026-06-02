@@ -92,6 +92,12 @@ class OptimizerConfig:
     # wire; overrun candidates that land many minutes late are unsalvageable
     # without defeating the timeout.
     propose_salvage_grace_s: int = 60
+    # calib variant: the external critic that grades the proposer's two-sided
+    # prediction after eval. Empty → resolve from the LongMemEval judge settings
+    # (LME) or the target model (LOCOMO); api key falls back to DEEPSEEK_API_KEY.
+    critic_score_model: str = ""
+    critic_score_base_url: str = ""
+    critic_score_api_key: str = ""
     dry_run: bool = False
     max_context_chars: int = 6000
     max_eval_workers: int = 1
@@ -985,6 +991,9 @@ class LocomoOptimizer:
         self._refresh_run_store(iteration)
         self._refresh_run_indexes(existing_candidates + evaluated)
         self._update_calibration_track_record()
+        self._score_prediction_feedback(
+            iteration, evaluated, workspace_dir, existing_candidates
+        )
         return evaluated
 
     def _build_progressive_workspace(
@@ -1167,14 +1176,15 @@ class LocomoOptimizer:
             benchmark_name=self._benchmark_prompt_name(),
             target_system=self.config.progressive_target_system,
         )
-        if self.config.proposer_variant == "critic":
-            critic_key = f"{key}_critic"
-            if not proposer_skill_path(critic_key).exists():
+        if self.config.proposer_variant in ("critic", "calib"):
+            suffix = self.config.proposer_variant
+            variant_key = f"{key}_{suffix}"
+            if not proposer_skill_path(variant_key).exists():
                 raise ValueError(
-                    f"proposer_variant='critic' requested but no critic skill "
-                    f"exists at skills/{critic_key}/SKILL.md"
+                    f"proposer_variant='{suffix}' requested but no skill "
+                    f"exists at skills/{variant_key}/SKILL.md"
                 )
-            return critic_key
+            return variant_key
         return key
 
     def _resolve_proposer_skill(self) -> str:
@@ -1542,6 +1552,197 @@ class LocomoOptimizer:
                 {"event": "world_model_distill_failed", "error": repr(exc)}
             )
 
+    # ---- calib variant: external prediction-accuracy critic ----------------
+
+    def _calib_result_path(self, candidate: CandidateResult) -> Path | None:
+        """Resolve a candidate's result json to an absolute path."""
+        rp = getattr(candidate, "result_path", "") or ""
+        if rp:
+            p = Path(rp)
+            if not p.is_absolute():
+                p = (self.run_dir.parent.parent / rp) if rp.startswith("runs/") else (self.run_dir / rp)
+            if p.is_file():
+                return p
+        cid = getattr(candidate, "candidate_id", "") or ""
+        hits = sorted((self.run_dir / "candidate_results").glob(f"*{cid}*.json")) if cid else []
+        return hits[0] if hits else None
+
+    def _calib_base_breakdown(
+        self, base_iter: int | None, existing_candidates: list[CandidateResult]
+    ) -> dict:
+        """score_breakdown of the iter the proposer declared it built on.
+
+        Declared `iter_<N>` → that iter's candidate_results; `clean`/absent →
+        the current best-passrate committed candidate (the de-facto parent).
+        """
+        from worldcalib.prediction_feedback import load_score_breakdown
+
+        if base_iter is not None:
+            hits = sorted(
+                (self.run_dir / "candidate_results").glob(f"iter{base_iter:03d}*.json")
+            )
+            if hits:
+                return load_score_breakdown(hits[0])
+        scored = [c for c in existing_candidates if c.passrate is not None]
+        if scored:
+            best = max(scored, key=lambda c: c.passrate)
+            p = self._calib_result_path(best)
+            if p:
+                return load_score_breakdown(p)
+        return {}
+
+    def _critic_score_client(self):
+        """Host-side LLM client for the calib critic grader.
+
+        Prefers the explicit critic_score_* config, then the LongMemEval judge
+        settings, then the target model. Resolves DEEPSEEK_API_KEY from env when
+        the configured key is empty/EMPTY.
+        """
+        import os
+        from worldcalib.model import LocalModelClient
+
+        model = self.config.critic_score_model or getattr(
+            self.config, "judge_model", ""
+        ) or self.config.model
+        base_url = self.config.critic_score_base_url or getattr(
+            self.config, "judge_base_url", ""
+        ) or self.config.base_url
+        key = (
+            self.config.critic_score_api_key
+            or getattr(self.config, "judge_api_key", None)
+            or ""
+        )
+        if not key or key == "EMPTY":
+            key = os.environ.get("DEEPSEEK_API_KEY") or os.environ.get(
+                "LONGMEMEVAL_JUDGE_API_KEY", ""
+            )
+        return LocalModelClient(
+            model=model, base_url=base_url, api_key=key, timeout_s=300,
+            chat_template_kwargs={},
+        )
+
+    def _calib_critic_grade(
+        self, iteration: int, prediction_text: str, metrics: dict
+    ) -> tuple[float | None, str]:
+        """Ask the critic LLM for a 0–100 prediction-accuracy score + reasoning."""
+        import json as _json
+        import re as _re
+
+        prompt = (
+            "You are an independent CALIBRATION critic in an optimization loop. "
+            "A proposer made a TWO-SIDED prediction before its candidate was "
+            "evaluated: which question types it would IMPROVE (Upside) and which "
+            "might REGRESS (Downside). Below is that prediction and the MEASURED "
+            "per-question-type outcome vs the parent it built on. Grade ONLY the "
+            "quality of the prediction (its calibration / world-model), NOT how "
+            "good the patch was.\n\n"
+            "Scoring guidance (0–100): reward naming the types that truly moved "
+            "(both gains AND regressions); penalize SURPRISE regressions (real "
+            "regressions the proposer failed to name) most heavily; do not reward "
+            "vague optimism. A prediction that honestly named a downside that then "
+            "happened is BETTER than one that ignored it.\n\n"
+            f"=== proposer prediction.md ===\n{prediction_text.strip()[:4000]}\n\n"
+            f"=== measured outcome (mechanical metrics) ===\n"
+            f"{_json.dumps(metrics, ensure_ascii=False, indent=2)[:3000]}\n\n"
+            "Respond with EXACTLY:\n"
+            "SCORE: <integer 0-100>\n"
+            "REASONING: <2-5 sentences: which types it called right, which it "
+            "missed, and the single most important world-model fix for next iter>"
+        )
+        try:
+            resp = self._critic_score_client().chat(
+                [{"role": "user", "content": prompt}],
+                max_tokens=600,
+                temperature=0.0,
+            )
+            text = resp.content or ""
+        except Exception as exc:  # noqa: BLE001
+            return None, f"(critic LLM call failed: {exc!r})"
+        m = _re.search(r"SCORE:\s*([0-9]+(?:\.[0-9]+)?)", text)
+        score = float(m.group(1)) if m else None
+        rm = _re.search(r"REASONING:\s*(.+)", text, _re.S)
+        reasoning = (rm.group(1).strip() if rm else text.strip())[:2000]
+        return score, reasoning
+
+    def _score_prediction_feedback(
+        self,
+        iteration: int,
+        evaluated: list[CandidateResult],
+        workspace_dir: Path,
+        existing_candidates: list[CandidateResult],
+    ) -> None:
+        """calib variant: grade this iter's prediction vs the real outcome.
+
+        Runs AFTER eval. Computes the mechanical metrics (prediction_feedback),
+        asks the critic LLM for a score + reasoning, writes ``critic_feedback.md``
+        (read by the next iter's proposer), and logs a ``prediction_score`` event
+        that forms the calibration learning curve. Best-effort; never breaks the
+        loop.
+        """
+        if self.config.proposer_variant != "calib" or not evaluated:
+            return
+        try:
+            from worldcalib.prediction_feedback import (
+                evaluate_prediction,
+                load_score_breakdown,
+                parse_prediction,
+            )
+
+            pred_path = workspace_dir / "prediction.md"
+            if not pred_path.is_file():
+                return
+            pred_text = pred_path.read_text(encoding="utf-8")
+            cand_path = self._calib_result_path(evaluated[0])
+            cand_bd = load_score_breakdown(cand_path) if cand_path else {}
+            base_iter = parse_prediction(pred_text).base_iter
+            base_bd = self._calib_base_breakdown(base_iter, existing_candidates)
+            metrics = evaluate_prediction(pred_text, cand_bd, base_bd)
+            score, reasoning = self._calib_critic_grade(iteration, pred_text, metrics)
+
+            fb = self.run_dir / "critic_feedback.md"
+            lines = [
+                f"# iter_{iteration} prediction grade",
+                "",
+                f"**Calibration score: {score if score is not None else 'n/a'} / 100**",
+                "",
+                "## Critic reasoning",
+                reasoning or "(none)",
+                "",
+                "## Mechanical signals (vs your declared base)",
+                f"- upside hit rate: {metrics.get('upside_hit_rate')}",
+                f"- downside recall: {metrics.get('downside_recall')}",
+                f"- surprise regressions (you did NOT name): "
+                f"{metrics.get('surprise_regressions')}",
+                f"- net-bet direction correct: {metrics.get('net_bet_correct')} "
+                f"(overall Δ {metrics.get('overall_delta')})",
+                f"- you predicted improve: {metrics.get('predicted_upside')}",
+                f"- actually improved: {metrics.get('actually_improved')}",
+                f"- actually regressed: {metrics.get('actually_regressed')}",
+                "",
+                "Use this to update your world model so next iter's prediction is "
+                "better — especially the surprise regressions.",
+            ]
+            fb.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+            self._append_event(
+                {
+                    "iteration": iteration,
+                    "event": "prediction_score",
+                    "critic_score": score,
+                    "upside_hit_rate": metrics.get("upside_hit_rate"),
+                    "downside_recall": metrics.get("downside_recall"),
+                    "n_surprise_regressions": metrics.get("n_surprise_regressions"),
+                    "net_bet_correct": metrics.get("net_bet_correct"),
+                    "overall_delta": metrics.get("overall_delta"),
+                    "base_iter": base_iter,
+                }
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._append_event(
+                {"event": "prediction_score_failed", "iteration": iteration,
+                 "error": repr(exc)}
+            )
+
     def _sync_calibration_into_workspace(
         self, workspace_dir: Path, iteration: int
     ) -> None:
@@ -1575,6 +1776,13 @@ class LocomoOptimizer:
             )
             if prev.exists():
                 shutil.copy2(prev, workspace_dir / "prev_prediction.md")
+        # calib variant: stage the external critic's grade of the PREVIOUS
+        # iter's prediction (written to run_dir after that iter's eval) so the
+        # proposer reads it first thing and folds it into its world-model update.
+        if self.config.proposer_variant == "calib":
+            fb = self.run_dir / "critic_feedback.md"
+            if fb.exists():
+                shutil.copy2(fb, workspace_dir / "critic_feedback.md")
 
     def _sync_calibration_back_from_workspace(self, cwd: Path | None) -> None:
         """If the proposer appended to its workspace-local calibration copy,
