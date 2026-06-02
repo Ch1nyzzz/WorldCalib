@@ -18,6 +18,16 @@ LOCOMO_REMOTE_URL = (
     "https://raw.githubusercontent.com/snap-research/locomo/main/data/locomo10.json"
 )
 ANSWERABLE_CATEGORIES = frozenset({1, 2, 3, 4})
+# LoCoMo question-category integers → stable human labels, used as the
+# per-category score_breakdown keys (so the calib proposer can predict
+# Upside/Downside per category). Category 5 (adversarial/unanswerable) is
+# excluded by ANSWERABLE_CATEGORIES.
+LOCOMO_CATEGORY_NAMES = {
+    1: "multi-hop",
+    2: "temporal",
+    3: "open-domain",
+    4: "single-hop",
+}
 
 
 def project_root() -> Path:
@@ -136,6 +146,12 @@ def load_locomo_examples(
                     category=category,
                     evidence=evidence,
                     conversation=conversation,
+                    metadata={
+                        "question_type": LOCOMO_CATEGORY_NAMES.get(
+                            category, f"category-{category}"
+                        ),
+                        "category": category,
+                    },
                 )
             )
     return examples

@@ -266,6 +266,15 @@ class EvaluationRunner:
                         dry_run=self.dry_run,
                     )
             score_result = self.score_run(example, run)
+            task_metadata = dict(score_result.metadata or {})
+            # Per-question-type score_breakdown groups on metadata["question_type"].
+            # The longmemeval judge echoes it, but locomo's default scorer does
+            # not — fall back to the example's declared type/category so locomo
+            # also gets a per-category breakdown instead of a single "all" bucket.
+            if not task_metadata.get("question_type"):
+                qt = (getattr(example, "metadata", None) or {}).get("question_type")
+                if qt:
+                    task_metadata["question_type"] = qt
             return TaskResult(
                 task_id=example.task_id,
                 question=example.question,
@@ -276,7 +285,7 @@ class EvaluationRunner:
                 prompt_tokens=run.prompt_tokens,
                 completion_tokens=run.completion_tokens,
                 retrieved=[asdict(hit) for hit in run.retrieved],
-                metadata=dict(score_result.metadata or {}),
+                metadata=task_metadata,
             )
         except Exception as exc:  # noqa: BLE001 - candidate code can raise anything
             return TaskResult(
