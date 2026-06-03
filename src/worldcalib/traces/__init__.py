@@ -45,9 +45,15 @@ from .schema import (
 # Auto-register built-in adapters so importing the package is enough.
 from .adapters.longmemeval import LongMemEvalAdapter
 from .adapters.locomo import LocomoAdapter
+from .adapters.agentbench import AgentBenchAdapter
+from .adapters.tau2 import Tau2Adapter
+from .adapters.arc import ArcAdapter
 
 register_adapter(LongMemEvalAdapter())
 register_adapter(LocomoAdapter())
+register_adapter(AgentBenchAdapter())
+register_adapter(Tau2Adapter())
+register_adapter(ArcAdapter())
 
 __all__ = [
     "ALL_STATUSES",

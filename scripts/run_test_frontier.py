@@ -18,17 +18,19 @@ import argparse
 import os
 from pathlib import Path
 
-from worldcalib.locomo_optimizer import LocomoOptimizer, LocomoOptimizerConfig
-from worldcalib.longmemeval import (
+from worldcalib.memory.locomo_optimizer import LocomoOptimizer, LocomoOptimizerConfig
+from worldcalib.memory.longmemeval import (
     DEFAULT_LONGMEMEVAL_JUDGE_BASE_URL,
     DEFAULT_LONGMEMEVAL_JUDGE_MODEL,
     DEFAULT_LONGMEMEVAL_SCAFFOLDS,
 )
-from worldcalib.longmemeval_optimizer import (
+from worldcalib.memory.longmemeval_optimizer import (
     LongMemEvalOptimizer,
     LongMemEvalOptimizerConfig,
 )
-from worldcalib.scaffolds import DEFAULT_EVOLUTION_SEED_SCAFFOLDS
+from worldcalib.memory.scaffolds import (
+    DEFAULT_MEMORY_EVOLUTION_SEED_SCAFFOLDS as DEFAULT_EVOLUTION_SEED_SCAFFOLDS,
+)
 
 
 def _load_project_env() -> None:
