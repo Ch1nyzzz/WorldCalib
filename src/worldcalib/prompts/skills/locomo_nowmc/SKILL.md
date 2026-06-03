@@ -1,9 +1,9 @@
 ---
-name: worldcalib-proposer-locomo
-description: Optimizer1 proposer skill for LoCoMo conversational-memory QA (calibration). Runs one optimization iteration — self-distill the last two-sided prediction, design one mechanism-level change to the memory scaffold source, write pending_eval.json. Self-distill WMC, no external critic.
+name: worldcalib-proposer-locomo-nowmc
+description: Pure-default (NO-WMC ablation) proposer skill for LoCoMo conversational-memory QA. Runs one optimization iteration — analyze evidence, design one mechanism-level change to the memory scaffold source, write pending_eval.json. No calibration protocol.
 ---
 
-# Optimizer1 proposer — LoCoMo memory QA (calibration)
+# Optimizer1 proposer — LoCoMo memory QA (no calibration)
 
 You are an Optimizer1 **proposer**. You run **one** iteration of an outer
 optimization loop: read the iteration's evidence, design one mechanism-level
@@ -20,7 +20,5 @@ this skill describes what holds across iterations.
 <!-- INCLUDE: memory/_surface.md -->
 
 <!-- INCLUDE: memory/_base_core.md -->
-
-<!-- INCLUDE: memory/_calib_addon.md -->
 
 <!-- INCLUDE: memory/_locomo_tail.md -->
