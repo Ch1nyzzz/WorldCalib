@@ -10,7 +10,7 @@ from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Iterator
 
-from worldcalib.scaffolds import build_scaffold
+from worldcalib.memory.scaffolds import build_memory_scaffold
 from worldcalib.scaffolds.base import MemoryScaffold
 
 
@@ -21,12 +21,39 @@ SOURCE_PROJECT_PATH_KEYS = (
 )
 
 SOURCE_SCAFFOLD_CLASSES = {
-    "memgpt_source": ("worldcalib.scaffolds.memgpt_scaffold", "MemGPTSourceScaffold"),
+    "memgpt_source": (
+        "worldcalib.memory.scaffolds.memgpt_scaffold",
+        "MemGPTSourceScaffold",
+    ),
 }
 
 
 def load_candidate_scaffold(candidate: dict[str, Any], *, project_root: Path) -> MemoryScaffold:
     """Instantiate a memory scaffold from pending_eval candidate metadata."""
+
+    if candidate.get("kind") == "agent":
+        # Agent scaffolds are agentrl BaseClient subclasses, loaded separately.
+        from worldcalib.agentic.backends.agentbench.dynamic import (
+            load_candidate_agent_scaffold,
+        )
+
+        return load_candidate_agent_scaffold(candidate, project_root=project_root)
+
+    if candidate.get("kind") == "tau2_agent":
+        # tau2 scaffolds are LLMAgent factories, loaded separately (agentrl-free).
+        from worldcalib.agentic.backends.tau2.dynamic import (
+            load_candidate_tau2_scaffold,
+        )
+
+        return load_candidate_tau2_scaffold(candidate, project_root=project_root)
+
+    if candidate.get("kind") == "arc_solver":
+        # ARC solvers are single-shot ArcScaffolds, loaded separately (agentrl-free).
+        from worldcalib.reasoning.arc_dynamic import (
+            load_candidate_arc_scaffold,
+        )
+
+        return load_candidate_arc_scaffold(candidate, project_root=project_root)
 
     src_path = str(project_root / "src")
     if src_path not in sys.path:
@@ -45,7 +72,7 @@ def load_candidate_scaffold(candidate: dict[str, Any], *, project_root: Path) ->
                 str(scaffold_name),
                 source_project_path=source_project_path,
             )
-        return build_scaffold(str(scaffold_name))
+        return build_memory_scaffold(str(scaffold_name))
 
     module_path = str(candidate.get("module_path") or "").strip()
     module_name = str(candidate.get("module") or "").strip()

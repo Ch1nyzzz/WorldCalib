@@ -107,7 +107,7 @@ def _load_breakdown(result_path: Path) -> dict:
 
 def _locomo_category_map() -> dict[str, str]:
     """task_id -> LoCoMo question-type label, from the canonical loader."""
-    from worldcalib.locomo import load_locomo_examples
+    from worldcalib.memory.locomo import load_locomo_examples
 
     return {
         ex.task_id: (ex.metadata or {}).get("question_type")

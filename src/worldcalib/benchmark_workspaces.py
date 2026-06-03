@@ -53,8 +53,11 @@ LOCOMO_WORKSPACE_SPEC = BenchmarkWorkspaceSpec(
         "upstream.py",
         "scaffolds/__init__.py",
         "scaffolds/base.py",
-        "scaffolds/bm25_scaffold.py",
-        "scaffolds/memgpt_scaffold.py",
+        "memory/__init__.py",
+        "memory/locomo.py",
+        "memory/scaffolds/__init__.py",
+        "memory/scaffolds/bm25_scaffold.py",
+        "memory/scaffolds/memgpt_scaffold.py",
         "utils/__init__.py",
         "utils/text.py",
     ),
@@ -66,9 +69,56 @@ LONGMEMEVAL_WORKSPACE_SPEC = BenchmarkWorkspaceSpec(
     primary_source_file="scaffolds/base.py",
     source_files=(
         *LOCOMO_WORKSPACE_SPEC.source_files,
-        "longmemeval.py",
+        "memory/longmemeval.py",
     ),
 )
+
+
+AGENTBENCH_WORKSPACE_SPEC = BenchmarkWorkspaceSpec(
+    benchmark="agentbench",
+    primary_source_file="agentic/backends/agentbench/seed_passthrough.py",
+    source_files=(
+        *LOCOMO_WORKSPACE_SPEC.source_files,
+        "optcore/__init__.py",
+        "optcore/scaffold_base.py",
+        "agentic/__init__.py",
+        "agentic/backends/__init__.py",
+        "agentic/backends/agentbench/__init__.py",
+        "agentic/backends/agentbench/base.py",
+        "agentic/backends/agentbench/seed_passthrough.py",
+    ),
+)
+
+TAU2_WORKSPACE_SPEC = BenchmarkWorkspaceSpec(
+    benchmark="tau2",
+    primary_source_file="agentic/backends/tau2/seed_passthrough.py",
+    source_files=(
+        *LOCOMO_WORKSPACE_SPEC.source_files,
+        "optcore/__init__.py",
+        "optcore/scaffold_base.py",
+        "agentic/__init__.py",
+        "agentic/backends/__init__.py",
+        "agentic/backends/tau2/__init__.py",
+        "agentic/backends/tau2/base.py",
+        "agentic/backends/tau2/seed_passthrough.py",
+    ),
+)
+
+
+ARC_WORKSPACE_SPEC = BenchmarkWorkspaceSpec(
+    benchmark="arc_agi2",
+    primary_source_file="reasoning/arc_scaffolds/seed_passthrough.py",
+    source_files=(
+        *LOCOMO_WORKSPACE_SPEC.source_files,
+        "optcore/__init__.py",
+        "optcore/scaffold_base.py",
+        "reasoning/__init__.py",
+        "reasoning/arc_scaffolds/__init__.py",
+        "reasoning/arc_scaffolds/base.py",
+        "reasoning/arc_scaffolds/seed_passthrough.py",
+    ),
+)
+
 
 SWEBENCH_WORKSPACE_SPEC = BenchmarkWorkspaceSpec(
     benchmark="swebench",

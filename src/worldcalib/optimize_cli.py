@@ -19,18 +19,24 @@ import os
 import shutil
 from pathlib import Path
 
-from worldcalib.locomo_optimizer import LocomoOptimizer, LocomoOptimizerConfig
-from worldcalib.longmemeval import (
+from worldcalib.memory.locomo_optimizer import LocomoOptimizer, LocomoOptimizerConfig
+from worldcalib.memory.longmemeval import (
     DEFAULT_LONGMEMEVAL_JUDGE_BASE_URL,
     DEFAULT_LONGMEMEVAL_JUDGE_MODEL,
     DEFAULT_LONGMEMEVAL_SCAFFOLDS,
 )
-from worldcalib.longmemeval_optimizer import (
+from worldcalib.memory.longmemeval_optimizer import (
     LongMemEvalOptimizer,
     LongMemEvalOptimizerConfig,
 )
+# NOTE: agentbench (agentrl) and tau2 optimizers are imported lazily inside their
+# task branches — their eval venvs are mutually exclusive (agentbench needs
+# agentrl, tau2 needs tau2 and runs in .venv-tau2-eval without agentrl), so a
+# top-level import of either would break the other's launcher.
 from worldcalib.model import DEFAULT_BASE_URL, DEFAULT_MODEL
-from worldcalib.scaffolds import DEFAULT_EVOLUTION_SEED_SCAFFOLDS
+from worldcalib.memory.scaffolds import (
+    DEFAULT_MEMORY_EVOLUTION_SEED_SCAFFOLDS as DEFAULT_EVOLUTION_SEED_SCAFFOLDS,
+)
 
 
 def _csv(value: str) -> list[str]:
@@ -147,7 +153,17 @@ def _add_common_optimize_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--selection-policy",
         default="default",
-        help="Optimizer1 selection policy (default, progressive, bandit, ...)",
+        help="Optimizer1 selection policy (default, progressive, bandit, pareto, island, ...)",
+    )
+    parser.add_argument(
+        "--island-explore-c",
+        type=float,
+        default=0.5,
+        help=(
+            "UCB1 exploration weight for the 'island' selection policy. "
+            "Higher = more exploration (under-expanded leaders + clean seed); "
+            "lower = greedier toward the current passrate champion."
+        ),
     )
     parser.add_argument(
         "--baseline-dir",
@@ -199,7 +215,7 @@ def _add_common_optimize_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--proposer-variant",
-        choices=("prose", "critic", "calib"),
+        choices=("prose", "critic", "calib", "nowmc"),
         default="prose",
         help=(
             "Proposer world-model variant. 'prose' = append-only "
@@ -207,7 +223,9 @@ def _add_common_optimize_args(parser: argparse.ArgumentParser) -> None:
             "adversarial reference-class critic subagent. 'calib' = prose WMC + a "
             "two-sided prediction graded after eval by an external critic "
             "(prediction accuracy becomes an optimized scalar; routes to the "
-            "<benchmark>_calib skill)."
+            "<benchmark>_calib skill). 'nowmc' = pure-default ablation with NO "
+            "calibration protocol of any kind (no prose file, no prediction, no "
+            "critic; routes to the <benchmark>_nowmc skill)."
         ),
     )
     parser.add_argument(
@@ -244,6 +262,13 @@ def build_parser() -> argparse.ArgumentParser:
     target.add_argument(
         "--longmemeval", dest="task", action="store_const", const="longmemeval"
     )
+    target.add_argument(
+        "--agentbench", dest="task", action="store_const", const="agentbench"
+    )
+    target.add_argument("--tau2", dest="task", action="store_const", const="tau2")
+    target.add_argument(
+        "--arc-agi2", dest="task", action="store_const", const="arc_agi2"
+    )
 
     _add_common_optimize_args(parser)
 
@@ -261,6 +286,46 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--longmemeval-judge-timeout-s", type=int, default=300)
     parser.add_argument("--longmemeval-no-llm-judge", action="store_true")
 
+    parser.add_argument(
+        "--agentbench-task",
+        choices=("db", "os", "alfworld", "webshop"),
+        default="db",
+    )
+    parser.add_argument("--controller-url", default="http://localhost:5020/api")
+    parser.add_argument("--agentbench-runs", type=int, default=1)
+    parser.add_argument("--agentbench-concurrency", type=int, default=8)
+    # Default train split kept small (30): tasks without a dataset task-type
+    # (os/webshop/alfworld) are predicted per episode, which only stays tractable
+    # at a small episode count. db has task-types; raise this if running db wide.
+    parser.add_argument("--agentbench-train-size", type=int, default=30)
+    parser.add_argument("--agentbench-test-size", type=int, default=40)
+
+    parser.add_argument(
+        "--tau2-domain", choices=("telecom", "airline", "retail"), default="telecom"
+    )
+    parser.add_argument("--tau2-agent-model", default="deepseek/deepseek-chat")
+    parser.add_argument("--tau2-user-model", default="deepseek/deepseek-chat")
+    parser.add_argument("--tau2-agent-temperature", type=float, default=0.0)
+    parser.add_argument("--tau2-user-temperature", type=float, default=0.0)
+    parser.add_argument("--tau2-max-steps", type=int, default=200)
+    parser.add_argument("--tau2-runs", type=int, default=1)
+    parser.add_argument("--tau2-concurrency", type=int, default=4)
+    parser.add_argument("--tau2-train-size", type=int, default=40)
+    parser.add_argument("--tau2-test-size", type=int, default=40)
+    parser.add_argument("--tau2-pass-threshold", type=float, default=1.0)
+    parser.add_argument("--tau2-request-timeout-s", type=int, default=120)
+    parser.add_argument("--tau2-num-retries", type=int, default=2)
+
+    parser.add_argument(
+        "--arc-data-dir", default="/data/home/yuhan/ARC-AGI-2/data"
+    )
+    parser.add_argument("--arc-train-size", type=int, default=40)
+    parser.add_argument("--arc-test-size", type=int, default=40)
+    parser.add_argument("--arc-max-tokens", type=int, default=2048)
+    parser.add_argument("--arc-max-attempts", type=int, default=2)
+    parser.add_argument("--arc-runs", type=int, default=1)
+    parser.add_argument("--arc-concurrency", type=int, default=8)
+
     return parser
 
 
@@ -276,19 +341,30 @@ def main(argv: list[str] | None = None) -> int:
     )
     out_dir = args.out or Path("runs") / run_id
 
-    # The critic variant has no prose calibration file to seed.
-    if args.proposer_variant != "critic":
+    # The critic and nowmc variants have no prose calibration file to seed.
+    if args.proposer_variant not in ("critic", "nowmc"):
         _seed_calibration(out_dir, args.prev_calibration)
 
-    scaffolds_csv = (
-        _csv(args.scaffolds)
-        if args.scaffolds
-        else list(
-            DEFAULT_LONGMEMEVAL_SCAFFOLDS
-            if args.task == "longmemeval"
-            else DEFAULT_EVOLUTION_SEED_SCAFFOLDS
+    if args.scaffolds:
+        scaffolds_csv = _csv(args.scaffolds)
+    elif args.task == "longmemeval":
+        scaffolds_csv = list(DEFAULT_LONGMEMEVAL_SCAFFOLDS)
+    elif args.task == "agentbench":
+        from worldcalib.agentic.backends.agentbench import (
+            DEFAULT_AGENT_SEED_SCAFFOLDS,
         )
-    )
+
+        scaffolds_csv = list(DEFAULT_AGENT_SEED_SCAFFOLDS)
+    elif args.task == "tau2":
+        from worldcalib.agentic.backends.tau2 import DEFAULT_TAU2_SEED_SCAFFOLDS
+
+        scaffolds_csv = list(DEFAULT_TAU2_SEED_SCAFFOLDS)
+    elif args.task == "arc_agi2":
+        from worldcalib.reasoning.arc_scaffolds import DEFAULT_ARC_SEED_SCAFFOLDS
+
+        scaffolds_csv = list(DEFAULT_ARC_SEED_SCAFFOLDS)
+    else:
+        scaffolds_csv = list(DEFAULT_EVOLUTION_SEED_SCAFFOLDS)
     scaffold_extra = _scaffold_extra(args.scaffold_extra_json)
 
     shared = dict(
@@ -317,6 +393,7 @@ def main(argv: list[str] | None = None) -> int:
         scaffolds=tuple(scaffolds_csv),
         scaffold_extra=scaffold_extra,
         selection_policy=args.selection_policy,
+        island_explore_c=args.island_explore_c,
         baseline_dir=args.baseline_dir,
         summaries_in_workspace=not args.no_summary,
         proposer_sandbox=args.proposer_sandbox,
@@ -343,6 +420,65 @@ def main(argv: list[str] | None = None) -> int:
                 judge_api_key=args.longmemeval_judge_api_key,
                 judge_timeout_s=args.longmemeval_judge_timeout_s,
                 use_llm_judge=not args.longmemeval_no_llm_judge,
+            )
+        )
+    elif args.task == "agentbench":
+        from worldcalib.agentic.backends.agentbench.optimizer import (
+            AgentBenchOptimizer,
+            AgentBenchOptimizerConfig,
+        )
+
+        optimizer = AgentBenchOptimizer(
+            AgentBenchOptimizerConfig(
+                **shared,
+                agentbench_task=args.agentbench_task,
+                controller_url=args.controller_url,
+                agentbench_runs=args.agentbench_runs,
+                agentbench_concurrency=args.agentbench_concurrency,
+                agentbench_train_size=args.agentbench_train_size,
+                agentbench_test_size=args.agentbench_test_size,
+            )
+        )
+    elif args.task == "tau2":
+        from worldcalib.agentic.backends.tau2.optimizer import (
+            Tau2Optimizer,
+            Tau2OptimizerConfig,
+        )
+
+        optimizer = Tau2Optimizer(
+            Tau2OptimizerConfig(
+                **shared,
+                tau2_domain=args.tau2_domain,
+                tau2_agent_model=args.tau2_agent_model,
+                tau2_user_model=args.tau2_user_model,
+                tau2_agent_temperature=args.tau2_agent_temperature,
+                tau2_user_temperature=args.tau2_user_temperature,
+                tau2_max_steps=args.tau2_max_steps,
+                tau2_runs=args.tau2_runs,
+                tau2_concurrency=args.tau2_concurrency,
+                tau2_train_size=args.tau2_train_size,
+                tau2_test_size=args.tau2_test_size,
+                tau2_pass_threshold=args.tau2_pass_threshold,
+                tau2_request_timeout_s=args.tau2_request_timeout_s,
+                tau2_num_retries=args.tau2_num_retries,
+            )
+        )
+    elif args.task == "arc_agi2":
+        from worldcalib.reasoning.arc_optimizer import (
+            ArcOptimizer,
+            ArcOptimizerConfig,
+        )
+
+        optimizer = ArcOptimizer(
+            ArcOptimizerConfig(
+                **shared,
+                arc_data_dir=args.arc_data_dir,
+                arc_train_size=args.arc_train_size,
+                arc_test_size=args.arc_test_size,
+                arc_max_tokens=args.arc_max_tokens,
+                arc_max_attempts=args.arc_max_attempts,
+                arc_runs=args.arc_runs,
+                arc_concurrency=args.arc_concurrency,
             )
         )
     else:

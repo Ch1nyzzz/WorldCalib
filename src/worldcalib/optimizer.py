@@ -31,7 +31,12 @@ from worldcalib.claude_runner import (
 )
 from worldcalib.dynamic import load_candidate_scaffold
 from worldcalib.evaluation import EvaluationRunner, run_initial_frontier
-from worldcalib.locomo import default_data_path, load_locomo_examples, prepare_locomo, select_split
+from worldcalib.memory.locomo import (
+    default_data_path,
+    load_locomo_examples,
+    prepare_locomo,
+    select_split,
+)
 from worldcalib.model import DEFAULT_BASE_URL, DEFAULT_MODEL
 from worldcalib.optimization_cells import get_target_cells
 from worldcalib.pareto import ParetoPoint, pareto_frontier, save_frontier
@@ -39,7 +44,10 @@ from worldcalib.post_eval import write_diff_digest, write_post_eval_artifacts
 from worldcalib.run_store import RunStore, diff_stats
 from worldcalib.traces import TraceHarness, has_adapter
 from worldcalib.proposer_prompt import build_progressive_proposer_prompt
-from worldcalib.scaffolds import DEFAULT_EVOLUTION_SEED_SCAFFOLDS, DEFAULT_SCAFFOLD_TOP_KS
+from worldcalib.memory.scaffolds import (
+    DEFAULT_MEMORY_EVOLUTION_SEED_SCAFFOLDS as DEFAULT_EVOLUTION_SEED_SCAFFOLDS,
+    DEFAULT_MEMORY_SCAFFOLD_TOP_KS as DEFAULT_SCAFFOLD_TOP_KS,
+)
 from worldcalib.scaffolds.base import ScaffoldConfig
 from worldcalib.schemas import CandidateResult, LocomoExample
 
@@ -128,6 +136,10 @@ class OptimizerConfig:
     bandit_reward_clip: float = 2.0
     bandit_failed_iter_penalty: float = 0.5
     pareto_quality_threshold: float = 0.125
+    # UCB1 exploration weight for the ``island`` selection policy. Larger
+    # values pull the patch base toward under-expanded leaders (and the
+    # immortal clean seed) instead of the current passrate champion.
+    island_explore_c: float = 0.5
     proposer_sandbox: str = "none"
     proposer_docker_image: str = ""
     proposer_docker_workspace: str = "/workspace"
@@ -379,10 +391,11 @@ class LocomoOptimizer:
             elif self.config.selection_policy in {"random", "recent", "best"}:
                 budget = forced_budget or "medium"
             else:
-                # default and pareto both pin to fixed-high context every
-                # iter; the only difference is that pareto resamples the
-                # patch base from the current Pareto frontier instead of
-                # always re-baselining from the clean snapshot.
+                # default, pareto and island all pin to fixed-high context
+                # every iter; the only difference is the patch base. pareto
+                # resamples from the Pareto frontier and island walks an
+                # evolution tree with UCB, whereas default always
+                # re-baselines from the clean snapshot.
                 budget = forced_budget or "high"
             evaluated = self._run_progressive_proposer_iteration(
                 iteration,
@@ -399,6 +412,7 @@ class LocomoOptimizer:
                     "curai",
                     "curaii",
                     "pareto",
+                    "island",
                 },
                 selection_policy=self.config.selection_policy,
                 bandit_policy=bandit_policy,
@@ -529,6 +543,13 @@ class LocomoOptimizer:
             )
         elif policy_name == "pareto":
             curaii_base_iter = self._pareto_select_base(
+                existing_candidates,
+                iteration=iteration,
+                baseline_passrate=self._seed_passrate(existing_candidates),
+            )
+            curaii_refs_override = None
+        elif policy_name == "island":
+            curaii_base_iter = self._island_select_base(
                 existing_candidates,
                 iteration=iteration,
                 baseline_passrate=self._seed_passrate(existing_candidates),
@@ -1157,11 +1178,12 @@ class LocomoOptimizer:
     def _proposer_skill_key(self) -> str:
         """Return the benchmark skill key for this run.
 
-        The ``critic`` proposer variant routes to a ``<benchmark>_critic``
-        skill (ledger + adversarial critic). It is an error to request the
-        critic variant for a benchmark that has no critic skill, so a
-        misconfiguration fails loudly instead of silently using the prose
-        protocol.
+        The non-prose proposer variants route to a ``<benchmark>_<variant>``
+        skill: ``critic`` (ledger + adversarial critic), ``calib`` (prose WMC +
+        graded prediction), and ``nowmc`` (pure-default ablation, no calibration
+        protocol). It is an error to request a variant for a benchmark that has
+        no matching skill, so a misconfiguration fails loudly instead of
+        silently falling back to the prose protocol.
         """
 
         from worldcalib.prompts import benchmark_skill_name, proposer_skill_path
@@ -1170,7 +1192,7 @@ class LocomoOptimizer:
             benchmark_name=self._benchmark_prompt_name(),
             target_system=self.config.progressive_target_system,
         )
-        if self.config.proposer_variant in ("critic", "calib"):
+        if self.config.proposer_variant in ("critic", "calib", "nowmc"):
             suffix = self.config.proposer_variant
             variant_key = f"{key}_{suffix}"
             if not proposer_skill_path(variant_key).exists():
@@ -1814,7 +1836,14 @@ class LocomoOptimizer:
 
         No-op for the ``critic`` variant: it has no prose calibration file and
         sources history from the RunStore ledger instead.
+
+        Hard no-op for the ``nowmc`` variant: the pure-default ablation carries
+        no calibration protocol at all (no prose file, no prediction, no
+        world model), so nothing is staged into the workspace.
         """
+
+        if self.config.proposer_variant == "nowmc":
+            return
 
         if self.config.proposer_variant == "critic":
             # No prose calibration; stage the deterministically distilled
@@ -1847,8 +1876,13 @@ class LocomoOptimizer:
     def _sync_calibration_back_from_workspace(self, cwd: Path | None) -> None:
         """If the proposer appended to its workspace-local calibration copy,
         promote that back to the run-level file. Idempotent if unchanged.
+
+        Hard no-op for the ``nowmc`` ablation: it carries no prose calibration
+        file, so nothing is ever promoted back even if a stray file appears.
         """
 
+        if self.config.proposer_variant == "nowmc":
+            return
         if cwd is None:
             return
         src = Path(cwd) / "world_model_calibration.md"
@@ -3794,6 +3828,122 @@ class LocomoOptimizer:
         if not eligible:
             return None
         return random.choice(eligible)
+
+    def _iteration_parent_map(self, *, iteration: int) -> dict[int, int]:
+        """Reconstruct the patch-base parent edge for every prior iteration.
+
+        Reads each ``proposer_calls/iter_NNN/assignment.json`` (the
+        authoritative record of the harness-forced base) and maps
+        ``child_iter -> parent_iter``. A null/absent ``base_iter`` means the
+        iteration was grown from the clean seed, so its parent is the
+        immortal root ``0``. Reading from disk keeps the tree correct across
+        ``--resume`` without depending on in-memory state.
+        """
+
+        parents: dict[int, int] = {}
+        for i in range(1, iteration):
+            assignment = self._iteration_dir(i) / "assignment.json"
+            if not assignment.exists():
+                continue
+            try:
+                data = json.loads(assignment.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                continue
+            base = data.get("base_iter")
+            parents[i] = 0 if base is None else int(base)
+        return parents
+
+    def _island_select_base(
+        self,
+        existing_candidates: list[CandidateResult],
+        *,
+        iteration: int,
+        baseline_passrate: float,
+    ) -> int | None:
+        """Sample a patch base for the ``island`` selection policy.
+
+        Maintains an evolution tree over iterations and balances exploit vs
+        explore with UCB1. passrate is the sole metric:
+
+        * Every node is an iteration; its parent is the patch base it was
+          grown from (``assignment.json``); the clean seed is node ``0``.
+        * A node is an expandable *leader* iff it is the immortal seed
+          (node ``0``), OR its passrate strictly beats the seed baseline AND
+          no direct child has strictly higher passrate. This is the
+          "child replaces parent" rule: once iter4 beats iter1, iter1 drops
+          out of the leader set and only iter4 stays expandable.
+        * Among leaders we maximise
+          ``passrate(n) + c * sqrt(ln(N+1) / (visits(n)+1))`` where
+          ``visits(n)`` is how many iterations already used ``n`` as a base.
+          The seed's low passrate is offset by its exploration bonus, so it
+          stays a perpetual explore reservoir.
+
+        Returns the chosen iteration index, or ``None`` when the seed (node
+        ``0``) wins — the caller then runs the iteration from the clean
+        snapshot, exactly like the ``default``/``pareto`` empty-pool
+        fallback.
+        """
+
+        # passrate per evaluated iteration (max over candidates sharing an iter)
+        passrate: dict[int, float] = {0: baseline_passrate}
+        for item in existing_candidates:
+            item_iter = _candidate_iteration(item.candidate_id)
+            if item_iter is None or item_iter <= 0 or item_iter >= iteration:
+                continue
+            passrate[item_iter] = max(passrate.get(item_iter, 0.0), item.passrate)
+
+        parents = self._iteration_parent_map(iteration=iteration)
+
+        # visits(n) = number of evaluated iterations grown from n as a base;
+        # best_child(n) = the strongest direct child's passrate (replacement rule)
+        visits: dict[int, int] = {}
+        best_child: dict[int, float] = {}
+        for child, parent in parents.items():
+            if child not in passrate:
+                continue
+            visits[parent] = visits.get(parent, 0) + 1
+            best_child[parent] = max(best_child.get(parent, -1.0), passrate[child])
+
+        def snapshot_exists(item_iter: int) -> bool:
+            base_source = (
+                self._iteration_dir(item_iter)
+                / "source_snapshot"
+                / "candidate"
+                / "project_source"
+            )
+            return base_source.exists()
+
+        leaders: list[int] = [0]  # immortal clean-seed reservoir
+        for item_iter, item_passrate in passrate.items():
+            if item_iter == 0:
+                continue
+            if item_passrate <= baseline_passrate:
+                continue  # not worth exploiting over a clean start
+            if not snapshot_exists(item_iter):
+                continue
+            if best_child.get(item_iter, -1.0) > item_passrate:
+                continue  # superseded by a stronger child -> retired
+            leaders.append(item_iter)
+
+        total_visits = sum(visits.get(node, 0) for node in leaders)
+        log_term = math.log(total_visits + 1)
+        explore_c = self.config.island_explore_c
+
+        def ucb(node: int) -> float:
+            return passrate.get(node, 0.0) + explore_c * math.sqrt(
+                log_term / (visits.get(node, 0) + 1)
+            )
+
+        chosen = max(
+            leaders,
+            key=lambda node: (
+                ucb(node),
+                passrate.get(node, 0.0),
+                -visits.get(node, 0),
+                -node,
+            ),
+        )
+        return None if chosen == 0 else chosen
 
     def _state_snapshot_base_iteration(
         self,

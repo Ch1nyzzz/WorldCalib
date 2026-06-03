@@ -12,15 +12,20 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
-from worldcalib.locomo import default_data_path, load_locomo_examples, prepare_locomo, select_split
+from worldcalib.memory.locomo import (
+    default_data_path,
+    load_locomo_examples,
+    prepare_locomo,
+    select_split,
+)
 from worldcalib.metrics import passed, score_prediction
 from worldcalib.model import DEFAULT_BASE_URL, DEFAULT_MODEL, LocalModelClient
 from worldcalib.pareto import ParetoPoint, save_frontier
 from worldcalib.schemas import CandidateResult, LocomoExample, TaskResult
-from worldcalib.scaffolds import (
-    DEFAULT_EVOLUTION_SEED_SCAFFOLDS,
-    DEFAULT_SCAFFOLD_TOP_KS,
-    build_scaffold,
+from worldcalib.memory.scaffolds import (
+    DEFAULT_MEMORY_EVOLUTION_SEED_SCAFFOLDS as DEFAULT_EVOLUTION_SEED_SCAFFOLDS,
+    DEFAULT_MEMORY_SCAFFOLD_TOP_KS as DEFAULT_SCAFFOLD_TOP_KS,
+    build_memory_scaffold as build_scaffold,
 )
 from worldcalib.scaffolds.base import (
     MemoryScaffold,

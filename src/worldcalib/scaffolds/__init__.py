@@ -1,38 +1,20 @@
-"""Memory scaffold registry."""
+"""Shared memory scaffold base types.
+
+The concrete memory scaffold registry (LOCOMO + LongMemEval) now lives in
+``worldcalib.memory.scaffolds``; this package only re-exports the
+backend-agnostic base classes (``MemoryScaffold`` / ``RetrievalMemoryScaffold``
+/ ``ScaffoldConfig`` / ``ScaffoldRun``) that every backend — memory, agentic,
+and reasoning — shares from ``worldcalib.scaffolds.base``.
+"""
 
 from __future__ import annotations
 
-from worldcalib.scaffolds.base import MemoryScaffold, RetrievalMemoryScaffold, ScaffoldConfig, ScaffoldRun
-from worldcalib.scaffolds.memgpt_scaffold import MemGPTSourceScaffold
-
-
-SCAFFOLD_REGISTRY: dict[str, type[MemoryScaffold]] = {
-    MemGPTSourceScaffold.name: MemGPTSourceScaffold,
-}
-
-DEFAULT_EVOLUTION_SEED_SCAFFOLDS = (
-    MemGPTSourceScaffold.name,
+from worldcalib.scaffolds.base import (
+    MemoryScaffold,
+    RetrievalMemoryScaffold,
+    ScaffoldConfig,
+    ScaffoldRun,
 )
-
-DEFAULT_BASELINE_SCAFFOLDS = DEFAULT_EVOLUTION_SEED_SCAFFOLDS
-
-DEFAULT_MEMORY_SCAFFOLDS = DEFAULT_EVOLUTION_SEED_SCAFFOLDS
-
-DEFAULT_SCAFFOLD_TOP_KS = {
-    MemGPTSourceScaffold.name: 12,
-}
-
-
-def available_scaffolds() -> tuple[str, ...]:
-    return tuple(sorted(SCAFFOLD_REGISTRY))
-
-
-def build_scaffold(name: str) -> MemoryScaffold:
-    try:
-        return SCAFFOLD_REGISTRY[name]()
-    except KeyError as exc:
-        available = ", ".join(available_scaffolds())
-        raise ValueError(f"unknown scaffold {name!r}; available: {available}") from exc
 
 
 __all__ = [
@@ -40,10 +22,4 @@ __all__ = [
     "RetrievalMemoryScaffold",
     "ScaffoldConfig",
     "ScaffoldRun",
-    "DEFAULT_BASELINE_SCAFFOLDS",
-    "DEFAULT_EVOLUTION_SEED_SCAFFOLDS",
-    "DEFAULT_MEMORY_SCAFFOLDS",
-    "DEFAULT_SCAFFOLD_TOP_KS",
-    "available_scaffolds",
-    "build_scaffold",
 ]

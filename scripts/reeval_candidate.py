@@ -26,13 +26,13 @@ from pathlib import Path
 from worldcalib.dynamic import load_candidate_scaffold
 from worldcalib.evaluation import EvaluationRunner
 from worldcalib.scaffolds.base import ScaffoldConfig
-from worldcalib.longmemeval import (
+from worldcalib.memory.longmemeval import (
     LongMemEvalJudge,
     load_longmemeval_examples,
     prepare_longmemeval,
     select_split,
 )
-from worldcalib.longmemeval import default_split_path
+from worldcalib.memory.longmemeval import default_split_path
 
 
 def main() -> None:
