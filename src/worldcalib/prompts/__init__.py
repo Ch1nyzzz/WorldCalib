@@ -10,6 +10,12 @@ conventions. It is delivered to the proposer agent in one of two ways:
   - Codex path — the skill text is written into ``<workspace>/AGENTS.md``,
     which Codex auto-prepends to its system prompt at session start.
 
+A skill file may splice in shared fragments with ``<!-- INCLUDE: <relpath> -->``
+markers (resolved relative to ``skills/``); this lets per-task skills share a
+common core plus a backend-specific surface while staying thin. Includes are
+resolved first, then frontmatter is stripped and mode blocks are resolved, so an
+included fragment's ``MODE`` blocks are handled by the outer pass.
+
 A skill file may carry mode-specific blocks delimited by
 ``<!-- MODE:<name> -->`` / ``<!-- END MODE:<name> -->``. ``load_proposer_skill``
 keeps the block for the active mode and drops the others. Modes:
@@ -35,6 +41,10 @@ _MODE_BLOCK_RE = re.compile(
     re.DOTALL,
 )
 
+_INCLUDE_RE = re.compile(
+    r"[ \t]*<!-- INCLUDE:[ \t]*([\w./-]+)[ \t]*-->[ \t]*\n?",
+)
+
 PROPOSER_SKILL_MODES = (
     "default",
     "organized",
@@ -57,6 +67,32 @@ def _strip_frontmatter(text: str) -> str:
     if end < 0:
         return text
     return text[end + len("\n" + _FRONTMATTER_DELIM):]
+
+
+def _resolve_includes(text: str) -> str:
+    """Splice ``<!-- INCLUDE: <relpath> -->`` fragments in place.
+
+    Each marker is replaced by the body of ``skills/<relpath>`` with that
+    fragment's own frontmatter stripped. Resolution is a single non-nested pass:
+    a guard raises if an included fragment itself carries an INCLUDE marker, so
+    fragments stay flat and the outer ``MODE`` pass can still see their blocks.
+    """
+
+    def repl(match: re.Match[str]) -> str:
+        relpath = match.group(1)
+        frag_path = _SKILLS_DIR / relpath
+        if not frag_path.exists():
+            raise FileNotFoundError(
+                f"INCLUDE fragment {relpath!r} not found at {frag_path}."
+            )
+        frag = _strip_frontmatter(frag_path.read_text(encoding="utf-8"))
+        if _INCLUDE_RE.search(frag):
+            raise ValueError(
+                f"Nested INCLUDE in fragment {relpath!r} is not supported."
+            )
+        return frag.strip("\n") + "\n"
+
+    return _INCLUDE_RE.sub(repl, text)
 
 
 def _resolve_mode_blocks(text: str, mode: str) -> str:
@@ -92,6 +128,18 @@ def benchmark_skill_name(*, benchmark_name: str, target_system: str) -> str:
         or "graph" in target
     ):
         return "graph_colouring"
+    if "agentbench" in benchmark:
+        # Human name is "AgentBench <task> agent"; route to the per-task agentic
+        # skill (agentic/os, agentic/webshop, agentic/db, agentic/alfworld). The
+        # optimizer appends "_calib" to form the calib variant key.
+        for task in ("os", "webshop", "db", "alfworld"):
+            if task in benchmark:
+                return f"agentic/{task}"
+        return "agentic/os"
+    if "tau2" in benchmark or "tau2" in target:
+        return "agentic/tau2"
+    if "arc" in benchmark or "reasoning" in benchmark or "reasoning" in target:
+        return "reasoning"
     if "longmemeval" in benchmark:
         return "longmemeval"
     if "locomo" in benchmark:
@@ -119,7 +167,8 @@ def load_proposer_skill(skill_key: str, mode: str = "default") -> str:
             f"Available: {available}"
         )
     raw = path.read_text(encoding="utf-8")
-    body = _strip_frontmatter(raw)
+    spliced = _resolve_includes(raw)
+    body = _strip_frontmatter(spliced)
     return _resolve_mode_blocks(body, mode).rstrip() + "\n"
 
 
