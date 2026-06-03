@@ -4,6 +4,8 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 .venv/
+.venv-*/
+results/
 build/
 dist/
 runs/
@@ -13,3 +15,6 @@ logs/
 # Symlinked data — points outside the repo, would break for cloners
 data/locomo/
 data/longmemeval/
+
+# Cloned upstream benchmarks (AgentBench, etc.) — not vendored into this repo's git
+third_party/
