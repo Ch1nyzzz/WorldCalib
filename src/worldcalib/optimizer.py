@@ -190,8 +190,17 @@ class OptimizerConfig:
     # re-predicts each candidate's effect from its real diff + the shared
     # world model and selects the winner. When False, selection falls back to
     # a deterministic risk-adjusted rule over the proposers' self-predictions
-    # (the strongest net-interval lower bound) — kept as a control arm.
+    # (the strongest net-interval lower bound) — kept as a control arm. The
+    # same toggle gates the selector in the best-of-N mode below.
     fanout_orchestrator: bool = True
+    # Best-of-N single-proposer mode (calib variant only). When > 1, ONE
+    # proposer designs and fully implements this many distinct candidates in a
+    # single workspace (each under ./cand_<i>/), writes a prediction per
+    # candidate, and an independent selector (the same orchestrator agent,
+    # gated by fanout_orchestrator) picks the one to evaluate. Differs from
+    # fanout_k (K *parallel* proposer agents) by using one proposer; eval cost
+    # stays at one candidate. 1 = the classic single-candidate path.
+    bestofn_k: int = 1
 
 
 class LocomoOptimizer:
@@ -599,6 +608,22 @@ class LocomoOptimizer:
                 iteration=iteration,
                 as_of_iteration=max(0, iteration - 1),
                 base_iteration=state_base_iter,
+            )
+        if self.config.bestofn_k > 1 and self.config.proposer_variant == "calib":
+            # One proposer implements N candidates in a single workspace; an
+            # independent selector picks the winner. Reuses the already-computed
+            # base selection / run_store.begin_iteration above.
+            return self._run_bestofn_proposer_iteration(
+                iteration,
+                existing_candidates,
+                examples,
+                budget=budget,
+                policy_name=policy_name,
+                base_iter=curaii_base_iter,
+                refs_override=curaii_refs_override,
+                base_passrate=curaii_base_passrate,
+                base_average_score=curaii_base_average_score,
+                bandit_policy=bandit_policy,
             )
         if self.config.fanout_k > 1 and self.config.proposer_variant == "calib":
             # Base selection + run_store.begin_iteration are already done above;
@@ -1499,6 +1524,251 @@ class LocomoOptimizer:
         except (OSError, json.JSONDecodeError):
             return None, None
         return sel.get("winner"), sel.get("rationale")
+
+    # ------------------------------------------------------------------
+    # Best-of-N single-proposer: one proposer implements N, selector picks
+    # ------------------------------------------------------------------
+
+    def _resolve_bestofn_skill(self) -> str:
+        """Resolve the best-of-N proposer skill (``<base>_bestofn``)."""
+
+        from worldcalib.prompts import benchmark_skill_name, load_proposer_skill
+
+        base = benchmark_skill_name(
+            benchmark_name=self._benchmark_prompt_name(),
+            target_system=self.config.progressive_target_system,
+        )
+        return load_proposer_skill(
+            f"{base}_bestofn", self._proposer_skill_mode()
+        )
+
+    def _archive_bestofn_candidate(
+        self,
+        raw: dict[str, Any],
+        *,
+        workspace_dir: Path,
+        call_dir: Path,
+        idx: int,
+        reference_iterations: tuple[int, ...],
+        budget: str,
+    ) -> Path:
+        """Archive one best-of-N candidate's ``./cand_<i>/source_snapshot`` and
+        rewrite its source fields to the archive. Returns the edited source dir
+        (for the diff). Each candidate is its own complete implementation, so
+        every candidate is archived independently (unlike the single path's one
+        workspace snapshot)."""
+
+        src_field = raw.get("source_snapshot_path") or f"./cand_{idx}/source_snapshot"
+        src_path = Path(src_field).expanduser()
+        if not src_path.is_absolute():
+            src_path = workspace_dir / src_path
+        src_path = src_path.resolve(strict=False)
+        archived = (call_dir / f"cand_{idx}_source").resolve(strict=False)
+        if src_path.exists():
+            if archived.exists():
+                shutil.rmtree(archived)
+            shutil.copytree(src_path, archived)
+        raw["source_snapshot_path"] = str(archived)
+        raw["candidate_root"] = str(self.generated_dir)
+        extra = raw.get("extra")
+        if isinstance(extra, dict):
+            for key in (
+                "source_project_path",
+                "project_source_path",
+                "source_path",
+                "module_path",
+            ):
+                value = extra.get(key)
+                if not isinstance(value, str) or not value.strip():
+                    continue
+                p = Path(value).expanduser()
+                if not p.is_absolute():
+                    p = workspace_dir / p
+                p = p.resolve(strict=False)
+                if p == src_path or src_path in p.parents:
+                    extra[key] = str(
+                        (archived / p.relative_to(src_path)).resolve(strict=False)
+                    )
+        raw.setdefault("source_family", self.config.progressive_target_system)
+        raw.setdefault("budget", budget)
+        raw.setdefault("reference_iterations", list(reference_iterations))
+        default_kind = self._candidate_extra_defaults().get("kind")
+        if default_kind:
+            raw["kind"] = default_kind
+        return src_path
+
+    def _run_bestofn_proposer_iteration(
+        self,
+        iteration: int,
+        existing_candidates: list[CandidateResult],
+        examples: list[LocomoExample],
+        *,
+        budget: str,
+        policy_name: str,
+        base_iter: int | None,
+        refs_override: tuple[int, ...] | None,
+        base_passrate: float | None,
+        base_average_score: float | None,
+        bandit_policy: dict[str, Any] | None,
+    ) -> list[CandidateResult]:
+        """One best-of-N iteration: one proposer implements N candidates, an
+        independent selector picks the winner, only the winner is evaluated.
+
+        The proposer reads the shared world model (calib protocol) and writes a
+        per-candidate ``./cand_<i>/prediction.md``; the selector (the same
+        orchestrator agent) also reads the world model. The winner's prediction
+        chains into next iter's self-grade exactly as the single path's does.
+        """
+
+        iter_dir = self._iteration_dir(iteration)
+        call_dir = iter_dir / "proposer_bestofn"
+        workspace_dir, refs = self._build_progressive_workspace(
+            iteration=iteration,
+            budget=budget,
+            existing_candidates=existing_candidates,
+            call_dir=call_dir,
+            reference_iterations_override=refs_override,
+            bandit_policy=bandit_policy,
+            base_iter=base_iter,
+        )
+        # Swap the deployed proposer skill from calib to bestofn (the proposer
+        # produces N candidates, not one).
+        bestofn_skill = self._resolve_bestofn_skill()
+        self._deploy_proposer_skill(workspace_dir, skill_text=bestofn_skill)
+        pristine = call_dir / "source_snapshot_pristine"
+        snap = workspace_dir / "source_snapshot"
+        if snap.exists():
+            if pristine.exists():
+                shutil.rmtree(pristine)
+            shutil.copytree(snap, pristine)
+
+        prompt = self._fanout_proposer_prompt(
+            iteration=iteration,
+            budget=budget,
+            workspace_dir=workspace_dir,
+            reference_iterations=refs,
+            policy_name=policy_name,
+            bandit_policy=bandit_policy,
+            base_iter=base_iter,
+            base_passrate=base_passrate,
+            base_average_score=base_average_score,
+        )
+        result = self._run_proposer_agent(
+            prompt,
+            log_dir=call_dir / "agent" / "attempt_01",
+            name="proposer",
+            cwd=workspace_dir,
+            skill_text=bestofn_skill,
+        )
+        self._append_proposer_result_event(
+            iteration=iteration,
+            result=result,
+            selection_policy=policy_name,
+            extra={
+                "budget": budget,
+                "mode": "bestofn",
+                "call_dir": str(call_dir),
+                "workspace_dir": str(workspace_dir),
+            },
+        )
+
+        try:
+            pending = json.loads(
+                (workspace_dir / "pending_eval.json").read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError):
+            pending = {}
+        survivors: list[dict[str, Any]] = []
+        for idx, cand in enumerate(_pending_candidates(pending)):
+            if not isinstance(cand, dict):
+                continue
+            raw = dict(cand)
+            src_path = self._archive_bestofn_candidate(
+                raw,
+                workspace_dir=workspace_dir,
+                call_dir=call_dir,
+                idx=idx,
+                reference_iterations=refs,
+                budget=budget,
+            )
+            pred_path = src_path.parent / "prediction.md"
+            pred_text = (
+                pred_path.read_text(encoding="utf-8") if pred_path.is_file() else ""
+            )
+            survivors.append(
+                {
+                    "cand_id": f"c{idx}_{raw.get('name') or 'candidate'}",
+                    "candidate": raw,
+                    "workspace_dir": src_path.parent,
+                    "prediction_text": pred_text,
+                    "diff_text": self._capture_diff(pristine, src_path),
+                }
+            )
+
+        if not survivors:
+            self._append_event(
+                {
+                    "iteration": iteration,
+                    "event": "bestofn_no_survivors",
+                    "selection_policy": policy_name,
+                    "bestofn_k": self.config.bestofn_k,
+                }
+            )
+            return []
+
+        winner, selection_meta = self._fanout_select_winner(
+            iteration, survivors, reference_iterations=refs
+        )
+        self._append_event(
+            {
+                "iteration": iteration,
+                "event": "bestofn_selection",
+                "selection_policy": policy_name,
+                "bestofn_k": self.config.bestofn_k,
+                "survivors": [s["cand_id"] for s in survivors],
+                "winner": winner["cand_id"],
+                **selection_meta,
+            }
+        )
+
+        canonical_ws = self._workspace_dir(iteration)
+        canonical_ws.mkdir(parents=True, exist_ok=True)
+        if winner["prediction_text"]:
+            (canonical_ws / "prediction.md").write_text(
+                winner["prediction_text"], encoding="utf-8"
+            )
+        proposed = [winner["candidate"]]
+        (canonical_ws / "pending_eval.json").write_text(
+            json.dumps({"candidates": proposed}, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        evaluated = self._evaluate_proposed(iteration, proposed, examples)
+        best_ids = self._quality_frontier_ids(existing_candidates + evaluated)
+        write_post_eval_artifacts(
+            run_dir=self.run_dir,
+            call_dir=iter_dir,
+            iteration=iteration,
+            candidates=evaluated,
+            frontier_ids=best_ids,
+        )
+        self.trace_harness.record_iteration(
+            iteration=iteration,
+            candidates=evaluated,
+            patch_base=base_iter,
+            budget=budget,
+            selection_policy=policy_name,
+            proposer_call_dir=str(iter_dir),
+        )
+        self.run_store.record_eval(iteration, evaluated)
+        if evaluated:
+            self.run_store.commit_iteration(iteration)
+        self._refresh_run_store(iteration)
+        self._refresh_run_indexes(existing_candidates + evaluated)
+        self._update_calibration_track_record()
+        self._score_prediction_feedback(
+            iteration, evaluated, canonical_ws, existing_candidates
+        )
+        return evaluated
 
     def _build_progressive_workspace(
         self,
