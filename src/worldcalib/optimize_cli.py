@@ -270,6 +270,20 @@ def _add_common_optimize_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.set_defaults(fanout_orchestrator=True)
+    parser.add_argument(
+        "--bestofn-k",
+        type=int,
+        default=1,
+        help=(
+            "Best-of-N single-proposer (calib variant only). When > 1, ONE "
+            "proposer designs and fully implements this many distinct "
+            "candidates in a single workspace (each under ./cand_<i>/), writes "
+            "a prediction per candidate, and an independent selector (the same "
+            "orchestrator agent, gated by --no-fanout-orchestrator) picks the "
+            "one to evaluate. Differs from --fanout-k (K parallel agents) by "
+            "using one proposer. 1 = classic single-candidate path (default)."
+        ),
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -432,6 +446,7 @@ def main(argv: list[str] | None = None) -> int:
         dry_run_probe_k=args.dry_run_probe_k,
         fanout_k=args.fanout_k,
         fanout_orchestrator=args.fanout_orchestrator,
+        bestofn_k=args.bestofn_k,
     )
 
     if args.task == "longmemeval":
