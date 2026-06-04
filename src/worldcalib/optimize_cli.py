@@ -247,6 +247,29 @@ def _add_common_optimize_args(parser: argparse.ArgumentParser) -> None:
             "crash), skip it instead of burning a full eval. 0 disables (default)."
         ),
     )
+    parser.add_argument(
+        "--fanout-k",
+        type=int,
+        default=1,
+        help=(
+            "Fan-out best-of-N (calib variant only). When > 1, each iteration "
+            "spawns this many proposer agents IN PARALLEL — each independently "
+            "designs and fully implements ONE candidate — then an independent "
+            "orchestrator selects the single winner to evaluate. 1 = classic "
+            "single-proposer path (default). Eval cost stays at one candidate."
+        ),
+    )
+    parser.add_argument(
+        "--no-fanout-orchestrator",
+        dest="fanout_orchestrator",
+        action="store_false",
+        help=(
+            "With --fanout-k>1, skip the orchestrator agent and select the "
+            "winner by a deterministic risk-adjusted rule (strongest net "
+            "lower bound) over the proposers' self-predictions. Control arm."
+        ),
+    )
+    parser.set_defaults(fanout_orchestrator=True)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -301,7 +324,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--agentbench-test-size", type=int, default=40)
 
     parser.add_argument(
-        "--tau2-domain", choices=("telecom", "airline", "retail"), default="telecom"
+        "--tau2-domain",
+        choices=("telecom", "airline", "retail", "banking_knowledge"),
+        default="telecom",
     )
     parser.add_argument("--tau2-agent-model", default="deepseek/deepseek-chat")
     parser.add_argument("--tau2-user-model", default="deepseek/deepseek-chat")
@@ -405,6 +430,8 @@ def main(argv: list[str] | None = None) -> int:
         proposer_variant=args.proposer_variant,
         critic_gate_enforce=args.critic_gate_enforce,
         dry_run_probe_k=args.dry_run_probe_k,
+        fanout_k=args.fanout_k,
+        fanout_orchestrator=args.fanout_orchestrator,
     )
 
     if args.task == "longmemeval":

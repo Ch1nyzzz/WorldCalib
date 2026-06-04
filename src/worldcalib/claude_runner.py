@@ -867,26 +867,42 @@ def _extract_rate_limit(raw_stdout: str) -> tuple[bool, float | None]:
       * ``{"type":"result", "is_error":true, "api_error_status":429, ...}``
         (or a ``result`` text containing "hit your limit"), and/or
       * ``{"type":"rate_limit_event", "rate_limit_info":{"status":"rejected",
-        "resetsAt":<epoch>, ...}}``.
+        "resetsAt":<epoch>, ...}}`` — the *request* itself being ``rejected``.
+
+    Crucially, this keys ONLY on the request-level ``status`` field. The
+    sibling ``overageStatus`` field describes whether *overage billing*
+    (pay-as-you-go beyond the plan limit) is available, NOT whether the
+    request was throttled: an org with overage disabled emits
+    ``overageStatus:"rejected"`` on EVERY ``rate_limit_event`` — even ones
+    whose ``status`` is ``"allowed"``. Treating that as a rate limit was a
+    false-positive that flagged every successful call as throttled (and the
+    five_hour ``resetsAt`` is always present), making the optimizer discard a
+    just-written candidate and sleep ~5h. So ``overageStatus`` is ignored
+    here. As a second guard, a terminal ``result`` with ``is_error:false``
+    (the proposer produced a candidate) overrides any mid-stream rejected
+    event to ``False`` — a recovered request never warrants a wait.
     """
 
     rate_limited = False
+    succeeded = False
     resets_at: float | None = None
     for event in _jsonl_events(raw_stdout):
         et = str(event.get("type") or "")
-        if et == "result" and event.get("is_error"):
-            status = event.get("api_error_status")
-            text = event.get("result")
-            if status == 429 or (
-                isinstance(text, str) and "hit your limit" in text.lower()
-            ):
-                rate_limited = True
+        if et == "result":
+            if event.get("is_error"):
+                status = event.get("api_error_status")
+                text = event.get("result")
+                if status == 429 or (
+                    isinstance(text, str) and "hit your limit" in text.lower()
+                ):
+                    rate_limited = True
+            else:
+                succeeded = True
         elif et == "rate_limit_event":
             info = event.get("rate_limit_info")
             if isinstance(info, dict):
                 status = str(info.get("status") or "").lower()
-                overage = str(info.get("overageStatus") or "").lower()
-                if status == "rejected" or overage == "rejected":
+                if status == "rejected":
                     rate_limited = True
                 raw_reset = info.get("resetsAt")
                 if isinstance(raw_reset, (int, float)) and raw_reset > 0:
@@ -895,6 +911,8 @@ def _extract_rate_limit(raw_stdout: str) -> tuple[bool, float | None]:
                         if resets_at is None
                         else max(resets_at, float(raw_reset))
                     )
+    if succeeded:
+        rate_limited = False
     return rate_limited, resets_at
 
 
