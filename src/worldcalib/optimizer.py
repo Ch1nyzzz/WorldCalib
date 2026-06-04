@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -178,6 +179,19 @@ class OptimizerConfig:
     # 0 disables the probe (default, so the prose/no-wmc baselines are
     # unaffected); the critic launcher sets it to ~3.
     dry_run_probe_k: int = 0
+    # Fan-out best-of-N (calib variant only). When > 1, each iteration spawns
+    # this many proposer agents IN PARALLEL — each independently designs and
+    # fully implements ONE candidate in its own workspace — then an
+    # independent orchestrator agent (no self-enhancement bias) selects the
+    # single winner to evaluate. 1 = the classic single-proposer path
+    # (unchanged). Eval cost stays at one candidate; proposer cost scales ~k.
+    fanout_k: int = 1
+    # When True (and fanout_k > 1), an orchestrator agent independently
+    # re-predicts each candidate's effect from its real diff + the shared
+    # world model and selects the winner. When False, selection falls back to
+    # a deterministic risk-adjusted rule over the proposers' self-predictions
+    # (the strongest net-interval lower bound) — kept as a control arm.
+    fanout_orchestrator: bool = True
 
 
 class LocomoOptimizer:
@@ -586,6 +600,22 @@ class LocomoOptimizer:
                 as_of_iteration=max(0, iteration - 1),
                 base_iteration=state_base_iter,
             )
+        if self.config.fanout_k > 1 and self.config.proposer_variant == "calib":
+            # Base selection + run_store.begin_iteration are already done above;
+            # the fanout path reuses them and owns its own workspace builds,
+            # parallel proposers, orchestrator selection, and eval tail.
+            return self._run_fanout_proposer_iteration(
+                iteration,
+                existing_candidates,
+                examples,
+                budget=budget,
+                policy_name=policy_name,
+                base_iter=curaii_base_iter,
+                refs_override=curaii_refs_override,
+                base_passrate=curaii_base_passrate,
+                base_average_score=curaii_base_average_score,
+                bandit_policy=bandit_policy,
+            )
         for attempt in range(1, max_attempts + 1):
             if bandit_policy:
                 refs_override: tuple[int, ...] | None = tuple(
@@ -975,6 +1005,15 @@ class LocomoOptimizer:
                 raw.setdefault("budget", budget)
                 raw.setdefault("reference_iterations", list(reference_iterations))
                 raw.setdefault("source_snapshot_path", str(call_dir / "source_snapshot"))
+                # The optimizer authoritatively owns the candidate ``kind`` (which
+                # backend loader runs it). The proposer is told to set it but
+                # occasionally omits it, and a missing kind silently routes an
+                # agent / tau2 / arc candidate to the MEMORY loader, which rejects
+                # the unknown scaffold_name (``dynamic._load_source_project_scaffold``)
+                # and fails every import. Force it from the backend default.
+                default_kind = self._candidate_extra_defaults().get("kind")
+                if default_kind:
+                    raw["kind"] = default_kind
         normalized_pending = json.dumps(
             {"candidates": proposed},
             indent=2,
@@ -1010,6 +1049,456 @@ class LocomoOptimizer:
             iteration, evaluated, workspace_dir, existing_candidates
         )
         return evaluated
+
+    # ------------------------------------------------------------------
+    # Fan-out best-of-N (calib variant): K parallel proposers + orchestrator
+    # ------------------------------------------------------------------
+
+    def _resolve_orchestrator_skill(self) -> str:
+        """Resolve the orchestrator selection skill for this benchmark.
+
+        Mirrors :meth:`_resolve_proposer_skill` but routes to the
+        ``<base>_orchestrator`` skill key instead of the ``_calib`` proposer
+        variant — the orchestrator's contract is selection, not generation.
+        """
+
+        from worldcalib.prompts import benchmark_skill_name, load_proposer_skill
+
+        base = benchmark_skill_name(
+            benchmark_name=self._benchmark_prompt_name(),
+            target_system=self.config.progressive_target_system,
+        )
+        return load_proposer_skill(
+            f"{base}_orchestrator", self._proposer_skill_mode()
+        )
+
+    def _fanout_proposer_prompt(
+        self,
+        *,
+        iteration: int,
+        budget: str,
+        workspace_dir: Path,
+        reference_iterations: tuple[int, ...],
+        policy_name: str,
+        bandit_policy: dict[str, Any] | None,
+        base_iter: int | None,
+        base_passrate: float | None,
+        base_average_score: float | None,
+    ) -> str:
+        """Build the per-proposer assignment prompt (mirrors the single path)."""
+
+        return build_progressive_proposer_prompt(
+            run_id=self.config.run_id,
+            iteration=iteration,
+            run_dir=workspace_dir,
+            pending_eval_path=workspace_dir / "pending_eval.json",
+            summaries_dir=workspace_dir / "summaries",
+            include_summaries=self._summaries_in_workspace_enabled(),
+            reference_iterations_dir=workspace_dir / "reference_iterations",
+            generated_dir=workspace_dir / "generated",
+            source_snapshot_dir=workspace_dir / "source_snapshot",
+            budget=budget,
+            reference_iterations=reference_iterations,
+            target_system=self.config.progressive_target_system,
+            optimization_directions=(
+                self._optimization_direction_lines(
+                    self.config.progressive_target_system
+                )
+                if self.config.include_optimization_direction
+                else ()
+            ),
+            split=self.config.split,
+            limit=self.config.limit,
+            selection_policy=policy_name,
+            bandit_policy=bandit_policy,
+            benchmark_name=self._benchmark_prompt_name(),
+            current_base_iter=base_iter,
+            current_base_passrate=base_passrate,
+            current_base_average_score=base_average_score,
+            state_path=(
+                workspace_dir / "state.md"
+                if self.config.organized and self.config.organized_state_md
+                else None
+            ),
+            organized=self.config.organized,
+            trace_harness_dir=(
+                workspace_dir / "traces"
+                if self.config.proposer_show_trace_harness_section
+                else None
+            ),
+        )
+
+    def _normalize_fanout_candidate(
+        self,
+        raw: dict[str, Any],
+        *,
+        workspace_dir: Path,
+        call_dir: Path,
+        reference_iterations: tuple[int, ...],
+        budget: str,
+    ) -> None:
+        """Rewrite a fan-out candidate's paths to its archived snapshot.
+
+        Same normalization the single-proposer path applies inline before
+        eval (workspace→archive source rewrite, default fields, forced kind),
+        so the selected winner is loadable by :meth:`_evaluate_proposed`.
+        """
+
+        self._normalize_workspace_candidate_paths(
+            raw,
+            workspace_dir=workspace_dir,
+            workspace_generated_dir=workspace_dir / "generated",
+        )
+        self._rewrite_workspace_source_paths_to_archive(
+            raw,
+            workspace_dir=workspace_dir,
+            archived_source_snapshot=call_dir / "source_snapshot",
+        )
+        raw.setdefault("source_family", self.config.progressive_target_system)
+        raw.setdefault("budget", budget)
+        raw.setdefault("reference_iterations", list(reference_iterations))
+        raw.setdefault("source_snapshot_path", str(call_dir / "source_snapshot"))
+        default_kind = self._candidate_extra_defaults().get("kind")
+        if default_kind:
+            raw["kind"] = default_kind
+
+    def _capture_diff(self, pristine: Path, edited: Path) -> str:
+        """Unified diff of a proposer's edited source vs the pristine base."""
+
+        try:
+            proc = subprocess.run(
+                ["diff", "-ruN", str(pristine), str(edited)],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            return proc.stdout[:200_000]
+        except Exception as exc:  # noqa: BLE001 - diff is advisory context
+            return f"(diff unavailable: {exc!r})"
+
+    def _run_fanout_proposer_iteration(
+        self,
+        iteration: int,
+        existing_candidates: list[CandidateResult],
+        examples: list[LocomoExample],
+        *,
+        budget: str,
+        policy_name: str,
+        base_iter: int | None,
+        refs_override: tuple[int, ...] | None,
+        base_passrate: float | None,
+        base_average_score: float | None,
+        bandit_policy: dict[str, Any] | None,
+    ) -> list[CandidateResult]:
+        """One fan-out iteration: K parallel proposers → orchestrator → eval.
+
+        Each proposer independently designs and fully implements ONE candidate
+        in its own workspace and writes its own ``prediction.md``. An
+        independent orchestrator (no self-enhancement bias) re-predicts each
+        from its real diff + the shared world model and selects the single
+        winner; only that winner is evaluated. The world model promoted back is
+        the winner's, keeping the append-only log coherent (one append/iter).
+        """
+
+        k = self.config.fanout_k
+        iter_dir = self._iteration_dir(iteration)
+
+        # --- build K independent workspaces (sequential; no shared-state race)
+        specs: list[dict[str, Any]] = []
+        for idx in range(k):
+            call_dir = iter_dir / f"proposer_{idx}"
+            workspace_dir, refs = self._build_progressive_workspace(
+                iteration=iteration,
+                budget=budget,
+                existing_candidates=existing_candidates,
+                call_dir=call_dir,
+                reference_iterations_override=refs_override,
+                bandit_policy=bandit_policy,
+                base_iter=base_iter,
+            )
+            pristine = call_dir / "source_snapshot_pristine"
+            snap = workspace_dir / "source_snapshot"
+            if snap.exists():
+                if pristine.exists():
+                    shutil.rmtree(pristine)
+                shutil.copytree(snap, pristine)
+            prompt = self._fanout_proposer_prompt(
+                iteration=iteration,
+                budget=budget,
+                workspace_dir=workspace_dir,
+                reference_iterations=refs,
+                policy_name=policy_name,
+                bandit_policy=bandit_policy,
+                base_iter=base_iter,
+                base_passrate=base_passrate,
+                base_average_score=base_average_score,
+            )
+            specs.append(
+                {
+                    "idx": idx,
+                    "call_dir": call_dir,
+                    "workspace_dir": workspace_dir,
+                    "pristine": pristine,
+                    "refs": refs,
+                    "prompt": prompt,
+                }
+            )
+
+        # --- run the K proposers in parallel (no shared-state writes inside)
+        def _run_one(spec: dict[str, Any]) -> Any:
+            return self._run_proposer_agent(
+                spec["prompt"],
+                log_dir=spec["call_dir"] / "agent" / "attempt_01",
+                name="proposer",
+                cwd=spec["workspace_dir"],
+                sync_calibration_back=False,
+            )
+
+        with ThreadPoolExecutor(max_workers=k) as pool:
+            results = list(pool.map(_run_one, specs))
+
+        # --- collect surviving candidates (valid pending_eval + a diff)
+        survivors: list[dict[str, Any]] = []
+        for spec, result in zip(specs, results):
+            self._append_proposer_result_event(
+                iteration=iteration,
+                result=result,
+                selection_policy=policy_name,
+                extra={
+                    "budget": budget,
+                    "fanout_proposer": spec["idx"],
+                    "call_dir": str(spec["call_dir"]),
+                    "workspace_dir": str(spec["workspace_dir"]),
+                },
+            )
+            ws = spec["workspace_dir"]
+            pend_path = ws / "pending_eval.json"
+            try:
+                pending = json.loads(pend_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            cands = _pending_candidates(pending)
+            if not cands or not isinstance(cands[0], dict):
+                continue
+            raw = dict(cands[0])
+            self._normalize_fanout_candidate(
+                raw,
+                workspace_dir=ws,
+                call_dir=spec["call_dir"],
+                reference_iterations=spec["refs"],
+                budget=budget,
+            )
+            cand_id = f"p{spec['idx']}_{raw.get('name') or 'candidate'}"
+            pred_path = ws / "prediction.md"
+            pred_text = (
+                pred_path.read_text(encoding="utf-8") if pred_path.is_file() else ""
+            )
+            diff_text = self._capture_diff(spec["pristine"], ws / "source_snapshot")
+            survivors.append(
+                {
+                    "cand_id": cand_id,
+                    "candidate": raw,
+                    "workspace_dir": ws,
+                    "prediction_text": pred_text,
+                    "diff_text": diff_text,
+                }
+            )
+
+        if not survivors:
+            self._append_event(
+                {
+                    "iteration": iteration,
+                    "event": "fanout_no_survivors",
+                    "selection_policy": policy_name,
+                    "fanout_k": k,
+                }
+            )
+            return []
+
+        # --- select the winner (orchestrator, or deterministic fallback)
+        winner, selection_meta = self._fanout_select_winner(
+            iteration, survivors, reference_iterations=specs[0]["refs"]
+        )
+        self._append_event(
+            {
+                "iteration": iteration,
+                "event": "fanout_selection",
+                "selection_policy": policy_name,
+                "fanout_k": k,
+                "survivors": [s["cand_id"] for s in survivors],
+                "winner": winner["cand_id"],
+                **selection_meta,
+            }
+        )
+
+        # --- promote winner's prediction + world model so self-distill chains
+        canonical_ws = self._workspace_dir(iteration)
+        canonical_ws.mkdir(parents=True, exist_ok=True)
+        win_pred = winner["workspace_dir"] / "prediction.md"
+        if win_pred.is_file():
+            shutil.copy2(win_pred, canonical_ws / "prediction.md")
+        self._sync_calibration_back_from_workspace(winner["workspace_dir"])
+
+        # --- evaluate ONLY the winner, then run the standard post-eval tail
+        proposed = [winner["candidate"]]
+        normalized_pending = json.dumps(
+            {"candidates": proposed}, indent=2, ensure_ascii=False
+        )
+        (canonical_ws / "pending_eval.json").write_text(
+            normalized_pending, encoding="utf-8"
+        )
+        evaluated = self._evaluate_proposed(iteration, proposed, examples)
+        best_ids = self._quality_frontier_ids(existing_candidates + evaluated)
+        write_post_eval_artifacts(
+            run_dir=self.run_dir,
+            call_dir=iter_dir,
+            iteration=iteration,
+            candidates=evaluated,
+            frontier_ids=best_ids,
+        )
+        self.trace_harness.record_iteration(
+            iteration=iteration,
+            candidates=evaluated,
+            patch_base=base_iter,
+            budget=budget,
+            selection_policy=policy_name,
+            proposer_call_dir=str(iter_dir),
+        )
+        self.run_store.record_eval(iteration, evaluated)
+        if evaluated:
+            self.run_store.commit_iteration(iteration)
+        self._refresh_run_store(iteration)
+        self._refresh_run_indexes(existing_candidates + evaluated)
+        self._update_calibration_track_record()
+        self._score_prediction_feedback(
+            iteration, evaluated, canonical_ws, existing_candidates
+        )
+        return evaluated
+
+    def _fanout_select_winner(
+        self,
+        iteration: int,
+        survivors: list[dict[str, Any]],
+        *,
+        reference_iterations: tuple[int, ...],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Pick the winning candidate among survivors.
+
+        With a single survivor, returns it directly. Otherwise runs the
+        orchestrator agent (independent re-prediction; ``fanout_orchestrator``)
+        and falls back to a deterministic risk-adjusted rule (strongest
+        net-interval lower bound) when the orchestrator is off or unparseable.
+        """
+
+        if len(survivors) == 1:
+            return survivors[0], {"selector": "sole_survivor"}
+
+        by_id = {s["cand_id"]: s for s in survivors}
+        if self.config.fanout_orchestrator:
+            winner_id, rationale = self._run_orchestrator_select(
+                iteration, survivors, reference_iterations=reference_iterations
+            )
+            if winner_id in by_id:
+                return by_id[winner_id], {
+                    "selector": "orchestrator",
+                    "rationale": (rationale or "")[:500],
+                }
+            self._append_event(
+                {
+                    "iteration": iteration,
+                    "event": "fanout_orchestrator_unresolved",
+                    "winner_id": winner_id,
+                }
+            )
+
+        # Deterministic fallback: strongest net-interval lower bound.
+        from worldcalib.prediction_feedback import parse_prediction
+
+        def _lower_bound(s: dict[str, Any]) -> float:
+            lo, _ = parse_prediction(s["prediction_text"]).net_delta
+            return lo if lo is not None else float("-inf")
+
+        winner = max(survivors, key=_lower_bound)
+        return winner, {"selector": "risk_adjusted_lower_bound"}
+
+    def _run_orchestrator_select(
+        self,
+        iteration: int,
+        survivors: list[dict[str, Any]],
+        *,
+        reference_iterations: tuple[int, ...],
+    ) -> tuple[str | None, str | None]:
+        """Stage candidates for the orchestrator agent and read its choice.
+
+        Builds an orchestrator workspace exposing the shared world model and a
+        ``candidates/<id>/`` dir per survivor (its prediction.md, real diff, and
+        pending_eval.json), runs the orchestrator skill, and parses
+        ``selection.json``. Returns ``(winner_id, rationale)`` or ``(None, None)``.
+        """
+
+        orch_dir = self._iteration_dir(iteration) / "orchestrator"
+        orch_ws = orch_dir / "workspace"
+        if orch_ws.exists():
+            shutil.rmtree(orch_ws)
+        (orch_ws / "candidates").mkdir(parents=True, exist_ok=True)
+
+        wmc = self.run_dir / "world_model_calibration.md"
+        if wmc.exists():
+            shutil.copy2(wmc, orch_ws / "world_model_calibration.md")
+        for s in survivors:
+            cdir = orch_ws / "candidates" / s["cand_id"]
+            cdir.mkdir(parents=True, exist_ok=True)
+            (cdir / "prediction.md").write_text(
+                s["prediction_text"], encoding="utf-8"
+            )
+            (cdir / "diff").write_text(s["diff_text"], encoding="utf-8")
+            (cdir / "pending_eval.json").write_text(
+                json.dumps({"candidates": [s["candidate"]]}, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        self._copy_reference_iterations(
+            orch_ws / "reference_iterations",
+            reference_iterations=reference_iterations,
+        )
+        self._copy_workspace_traces(orch_ws / "traces")
+        self._write_runtime_config(orch_ws)
+        orch_skill = self._resolve_orchestrator_skill()
+        self._deploy_proposer_skill(orch_ws, skill_text=orch_skill)
+        self._write_proposer_agent_config(orch_ws)
+        self._deploy_mcp_server_assets(orch_ws)
+
+        ids = ", ".join(s["cand_id"] for s in survivors)
+        prompt = (
+            f"Iteration {iteration}: select the single winning candidate.\n\n"
+            f"The {len(survivors)} candidates are staged under `./candidates/` "
+            f"(ids: {ids}); each dir has that proposer's `prediction.md`, its "
+            f"real `diff`, and `pending_eval.json`. Read `./world_model_"
+            f"calibration.md`, independently re-predict each candidate's effect "
+            f"from its real diff (treat each self-prediction as input, not "
+            f"ground truth), then write `./selection.json` per your contract. "
+            f"Pick exactly one winner by the risk-adjusted rule; do not veto all."
+        )
+        result = self._run_proposer_agent(
+            prompt,
+            log_dir=orch_dir / "agent",
+            name="orchestrator",
+            cwd=orch_ws,
+            skill_text=orch_skill,
+            sync_calibration_back=False,
+        )
+        self._append_proposer_result_event(
+            iteration=iteration,
+            result=result,
+            selection_policy="fanout_orchestrator",
+            extra={"call_dir": str(orch_dir), "workspace_dir": str(orch_ws)},
+        )
+        try:
+            sel = json.loads(
+                (orch_ws / "selection.json").read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError):
+            return None, None
+        return sel.get("winner"), sel.get("rationale")
 
     def _build_progressive_workspace(
         self,
@@ -1217,7 +1706,9 @@ class LocomoOptimizer:
             self._proposer_skill_key(), self._proposer_skill_mode()
         )
 
-    def _deploy_proposer_skill(self, workspace_dir: Path) -> None:
+    def _deploy_proposer_skill(
+        self, workspace_dir: Path, skill_text: str | None = None
+    ) -> None:
         """Deploy the resolved per-benchmark proposer skill into the workspace.
 
         The skill is the proposer's full self-contained contract — role,
@@ -1233,14 +1724,13 @@ class LocomoOptimizer:
         No-op when the proposer agent is neither Codex nor Claude.
         """
 
+        text = skill_text if skill_text is not None else self._resolve_proposer_skill()
         if self._uses_codex_proposer():
-            self._deploy_codex_agents_md(workspace_dir, self._resolve_proposer_skill())
+            self._deploy_codex_agents_md(workspace_dir, text)
             return
         if not self._uses_claude_subagent_proposer():
             return
-        (workspace_dir / "PROPOSER_SKILL.md").write_text(
-            self._resolve_proposer_skill(), encoding="utf-8"
-        )
+        (workspace_dir / "PROPOSER_SKILL.md").write_text(text, encoding="utf-8")
 
     def _deploy_codex_agents_md(self, workspace_dir: Path, skill_text: str) -> None:
         """Write the Codex-facing ``<workspace>/AGENTS.md``.
@@ -2339,6 +2829,8 @@ class LocomoOptimizer:
         log_dir: Path,
         name: str,
         cwd: Path | None = None,
+        skill_text: str | None = None,
+        sync_calibration_back: bool = True,
     ) -> Any:
         agent = self.config.proposer_agent.strip().lower()
         proposer_cwd = cwd or self.project_root
@@ -2366,8 +2858,12 @@ class LocomoOptimizer:
         # so the role / identity / contract text never enters the user
         # message. (Codex receives the same skill from <workspace>/AGENTS.md,
         # written by _deploy_proposer_skill.)
-        if self._uses_claude_subagent_proposer() and name == "proposer":
-            kwargs["claude_append_system_prompt"] = self._resolve_proposer_skill()
+        if self._uses_claude_subagent_proposer() and (
+            name == "proposer" or skill_text is not None
+        ):
+            kwargs["claude_append_system_prompt"] = (
+                skill_text if skill_text is not None else self._resolve_proposer_skill()
+            )
         # Codex has no per-workspace MCP config flag like Claude's
         # --mcp-config: we inject the runstore-tools server via
         # -c mcp_servers.runstore-tools.* on every exec instead.
@@ -2385,8 +2881,11 @@ class LocomoOptimizer:
             result = run_code_agent_prompt(prompt, agent=agent, **kwargs)
             # Promote any append the proposer made to its workspace-local
             # calibration copy back to the run-level file. Safe to do per
-            # attempt — copy is idempotent if the file is unchanged.
-            self._sync_calibration_back_from_workspace(kwargs.get("cwd"))
+            # attempt — copy is idempotent if the file is unchanged. Skipped in
+            # fan-out mode, where K parallel proposers each hold their own copy
+            # and only the selected winner's world model is promoted back.
+            if sync_calibration_back:
+                self._sync_calibration_back_from_workspace(kwargs.get("cwd"))
             if not (
                 self.config.wait_on_rate_limit
                 and getattr(result, "rate_limited", False)
@@ -2661,6 +3160,19 @@ class LocomoOptimizer:
             self._append_summary(iteration=iteration, candidate=result, proposal=raw)
         return results
 
+    def _probe_rejects_on_zero_completion_tokens(self) -> bool:
+        """Whether the dry-run probe may reject a candidate for emitting zero
+        completion tokens across all probe tasks.
+
+        True when the eval backend reports per-task token usage (memory, tau2):
+        zero completion tokens then genuinely signals a runtime crash. False for
+        backends that hardcode 0 tokens (agentbench, whose agentrl client never
+        surfaces usage) — there the heuristic would false-positive on every
+        working candidate, so the probe falls back to the raised-exception
+        signal only.
+        """
+        return True
+
     def _dry_run_probe(
         self,
         *,
@@ -2688,18 +3200,13 @@ class LocomoOptimizer:
         probe_examples = examples[:k]
         try:
             with tempfile.TemporaryDirectory() as tmp:
-                probe = EvaluationRunner(
-                    examples=probe_examples,
-                    out_dir=Path(tmp),
-                    model=self.config.model,
-                    base_url=self.config.base_url,
-                    api_key=self.config.api_key,
-                    timeout_s=self.config.eval_timeout_s,
-                    dry_run=self.config.dry_run,
-                    max_context_chars=self.config.max_context_chars,
-                    max_eval_workers=min(k, self.config.max_eval_workers),
-                    force=True,
-                )
+                # Use the BACKEND-specific runner (memory / agentbench / tau2),
+                # not a hardcoded generic EvaluationRunner: tau2 + agentbench
+                # ignore config.model/base_url and drive their own eval clients,
+                # so a generic runner would produce zero output on every probe
+                # task and falsely reject every candidate (the locomo-era probe
+                # only ever ran against the memory runner).
+                probe = self._make_evaluation_runner(probe_examples, out_dir=Path(tmp))
                 res = probe.evaluate_scaffold(
                     scaffold=scaffold,
                     scaffold_name=scaffold_name,
@@ -2708,7 +3215,11 @@ class LocomoOptimizer:
                 )
         except Exception as exc:  # noqa: BLE001 — a raised eval IS the crash signal
             return f"scaffold raised during dry-run: {type(exc).__name__}: {exc}"
-        if res.count > 0 and res.avg_completion_tokens == 0:
+        if (
+            res.count > 0
+            and self._probe_rejects_on_zero_completion_tokens()
+            and res.avg_completion_tokens == 0
+        ):
             return (
                 "dry-run produced zero model output on all "
                 f"{res.count} probe tasks (likely runtime crash)"

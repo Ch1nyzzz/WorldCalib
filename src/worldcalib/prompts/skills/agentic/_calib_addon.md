@@ -63,6 +63,8 @@ d. Re-read `./world_model_calibration.md` so the rest reasons from the latest.
 # iter_<THIS> prediction
 ## Candidate (one line)
 ## Base — the prior iter you rebuilt on (exact, e.g. iter_4, or `clean` for the seed)
+## Why this change & why it optimizes the whole system
+<the policy edit, the failure mode it attacks, and why the mechanism generalizes to unfamiliar episodes of the task — a general mechanism, not a per-episode patch>
 ## Mechanism (why it should move the metric)
 ## Upside — categories this should IMPROVE (and why)
 - <category>: <why>
