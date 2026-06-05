@@ -306,6 +306,9 @@ def build_parser() -> argparse.ArgumentParser:
     target.add_argument(
         "--arc-agi2", dest="task", action="store_const", const="arc_agi2"
     )
+    target.add_argument(
+        "--swebench", dest="task", action="store_const", const="swebench"
+    )
 
     _add_common_optimize_args(parser)
 
@@ -365,6 +368,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--arc-runs", type=int, default=1)
     parser.add_argument("--arc-concurrency", type=int, default=8)
 
+    parser.add_argument("--swebench-data-path", type=Path, default=None)
+    # Default None -> the swebench dispatch branch falls back to
+    # SwebenchOptimizerConfig.mini_swe_agent_source_path so we avoid a
+    # top-level import of the coding module here.
+    parser.add_argument("--mini-swe-agent-source-path", type=Path, default=None)
+    parser.add_argument("--mini-swe-agent-command", default="")
+    parser.add_argument("--mini-swe-agent-eval-command", default="")
+    parser.add_argument("--swebench-force", action="store_true")
+
     return parser
 
 
@@ -402,6 +414,10 @@ def main(argv: list[str] | None = None) -> int:
         from worldcalib.reasoning.arc_scaffolds import DEFAULT_ARC_SEED_SCAFFOLDS
 
         scaffolds_csv = list(DEFAULT_ARC_SEED_SCAFFOLDS)
+    elif args.task == "swebench":
+        from worldcalib.coding.swebench import DEFAULT_MINI_SWE_AGENT_NAME
+
+        scaffolds_csv = [DEFAULT_MINI_SWE_AGENT_NAME]
     else:
         scaffolds_csv = list(DEFAULT_EVOLUTION_SEED_SCAFFOLDS)
     scaffold_extra = _scaffold_extra(args.scaffold_extra_json)
@@ -523,6 +539,26 @@ def main(argv: list[str] | None = None) -> int:
                 arc_concurrency=args.arc_concurrency,
             )
         )
+    elif args.task == "swebench":
+        from worldcalib.coding.swebench_optimizer import (
+            SwebenchOptimizer,
+            SwebenchOptimizerConfig,
+        )
+
+        # mini_swe_agent_source_path falls back to the config default
+        # (DEFAULT_MINI_SWE_AGENT_SOURCE_PATH) when the flag is omitted.
+        swebench_kwargs = dict(
+            **shared,
+            data_path=args.swebench_data_path,
+            mini_swe_agent_command=args.mini_swe_agent_command,
+            mini_swe_agent_eval_command=args.mini_swe_agent_eval_command,
+            force=args.swebench_force,
+        )
+        if args.mini_swe_agent_source_path is not None:
+            swebench_kwargs["mini_swe_agent_source_path"] = (
+                args.mini_swe_agent_source_path
+            )
+        optimizer = SwebenchOptimizer(SwebenchOptimizerConfig(**swebench_kwargs))
     else:
         optimizer = LocomoOptimizer(LocomoOptimizerConfig(**shared))
 
