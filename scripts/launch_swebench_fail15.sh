@@ -66,9 +66,17 @@ DATA_PATH="${DATA_PATH:-data/swebench_train_fail15.json}"
 BASELINE_DIR="${BASELINE_DIR:-runs/baseline_swebench_fail15}"
 
 # Solver: deepseek-v4-flash mini-SWE-agent, run + eval through this repo's gate.
+# NB: the command templates contain literal {source_path}/{task_dir} placeholders
+# (substituted later by the optimizer). They must NOT be wrapped in a
+# ${VAR:-default} expansion — the '}' of {source_path} would prematurely close
+# the parameter expansion and corrupt the command. Use plain guarded assignments.
 RUN_SCRIPT="$(pwd)/scripts/run_miniswe_swebench_single.py"
-MINISWE_RUN_CMD="${MINISWE_RUN_CMD:-python ${RUN_SCRIPT} run --source-path {source_path} --instance-path {instance_path} --patch-path {patch_path} --task-dir {task_dir} --model openai/deepseek-v4-flash --base-url https://api.deepseek.com/v1 --max-tokens 4096 --api-key-env DEEPSEEK_API_KEY}"
-MINISWE_EVAL_CMD="${MINISWE_EVAL_CMD:-python ${RUN_SCRIPT} eval --source-path {source_path} --instance-path {instance_path} --patch-path {patch_path} --task-dir {task_dir}}"
+if [ -z "${MINISWE_RUN_CMD:-}" ]; then
+  MINISWE_RUN_CMD="python ${RUN_SCRIPT} run --source-path {source_path} --instance-path {instance_path} --patch-path {patch_path} --task-dir {task_dir} --model openai/deepseek-v4-flash --base-url https://api.deepseek.com/v1 --max-tokens 4096 --api-key-env DEEPSEEK_API_KEY"
+fi
+if [ -z "${MINISWE_EVAL_CMD:-}" ]; then
+  MINISWE_EVAL_CMD="python ${RUN_SCRIPT} eval --source-path {source_path} --instance-path {instance_path} --patch-path {patch_path} --task-dir {task_dir}"
+fi
 
 if [ ! -f "${BASELINE_DIR}/run_summary.json" ]; then
   printf 'fatal: baseline missing %s/run_summary.json (run scripts/build_swebench_fail15.py)\n' "$BASELINE_DIR" >&2
