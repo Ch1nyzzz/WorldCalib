@@ -309,6 +309,9 @@ def build_parser() -> argparse.ArgumentParser:
     target.add_argument(
         "--swebench", dest="task", action="store_const", const="swebench"
     )
+    target.add_argument(
+        "--autolab", dest="task", action="store_const", const="autolab"
+    )
 
     _add_common_optimize_args(parser)
 
@@ -377,6 +380,45 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mini-swe-agent-eval-command", default="")
     parser.add_argument("--swebench-force", action="store_true")
 
+    parser.add_argument(
+        "--autolab-tasks-path",
+        type=Path,
+        default=None,
+        help="Path to the AutoLab 36-task dir (default: third_party/autolab/tasks).",
+    )
+    parser.add_argument("--autolab-harbor-python", type=Path, default=None)
+    parser.add_argument("--autolab-harbor-binary", type=Path, default=None)
+    parser.add_argument("--autolab-agent", default="terminus-2")
+    parser.add_argument("--autolab-harbor-model", default=None)
+    parser.add_argument("--autolab-n-attempts", type=int, default=1)
+    parser.add_argument("--autolab-timeout-multiplier", type=float, default=1.0)
+    parser.add_argument("--autolab-concurrency", type=int, default=4)
+    parser.add_argument("--autolab-env-file", type=Path, default=None)
+    parser.add_argument("--autolab-reward-gate", type=float, default=0.5)
+    parser.add_argument(
+        "--autolab-score-mode",
+        choices=("best", "avg"),
+        default="best",
+        help="Which of Best@k / Avg@k drives TaskResult.score (default best).",
+    )
+    parser.add_argument(
+        "--autolab-task-ids",
+        default="",
+        help="Comma-separated subset of task ids; empty = all 36.",
+    )
+    parser.add_argument("--autolab-force", action="store_true")
+    parser.add_argument(
+        "--autolab-skip-patch-check",
+        dest="autolab_verify_patches",
+        action="store_false",
+        help=(
+            "Skip the startup check that the cyh_dev harbor is patched for "
+            "GPU passthrough + long command durations. Off-by-default; only "
+            "use when running CPU-only tasks on an intentionally-unpatched venv."
+        ),
+    )
+    parser.set_defaults(autolab_verify_patches=True)
+
     return parser
 
 
@@ -418,6 +460,10 @@ def main(argv: list[str] | None = None) -> int:
         from worldcalib.coding.swebench import DEFAULT_MINI_SWE_AGENT_NAME
 
         scaffolds_csv = [DEFAULT_MINI_SWE_AGENT_NAME]
+    elif args.task == "autolab":
+        from worldcalib.autolab.autolab import DEFAULT_AUTOLAB_SCAFFOLD_NAME
+
+        scaffolds_csv = [DEFAULT_AUTOLAB_SCAFFOLD_NAME]
     else:
         scaffolds_csv = list(DEFAULT_EVOLUTION_SEED_SCAFFOLDS)
     scaffold_extra = _scaffold_extra(args.scaffold_extra_json)
@@ -559,6 +605,37 @@ def main(argv: list[str] | None = None) -> int:
                 args.mini_swe_agent_source_path
             )
         optimizer = SwebenchOptimizer(SwebenchOptimizerConfig(**swebench_kwargs))
+    elif args.task == "autolab":
+        from worldcalib.autolab.autolab_optimizer import (
+            AutolabOptimizer,
+            AutolabOptimizerConfig,
+        )
+
+        # Path-typed flags fall back to AutolabOptimizerConfig defaults when
+        # omitted, so we avoid a top-level import of the autolab module here.
+        autolab_kwargs = dict(
+            **shared,
+            harbor_agent=args.autolab_agent,
+            harbor_n_attempts=args.autolab_n_attempts,
+            harbor_timeout_multiplier=args.autolab_timeout_multiplier,
+            harbor_concurrency=args.autolab_concurrency,
+            reward_gate=args.autolab_reward_gate,
+            score_mode=args.autolab_score_mode,
+            task_ids=tuple(_csv(args.autolab_task_ids)),
+            force=args.autolab_force,
+            verify_patches=args.autolab_verify_patches,
+        )
+        if args.autolab_tasks_path is not None:
+            autolab_kwargs["tasks_path"] = args.autolab_tasks_path
+        if args.autolab_harbor_python is not None:
+            autolab_kwargs["harbor_python"] = args.autolab_harbor_python
+        if args.autolab_harbor_binary is not None:
+            autolab_kwargs["harbor_binary"] = args.autolab_harbor_binary
+        if args.autolab_harbor_model is not None:
+            autolab_kwargs["harbor_model"] = args.autolab_harbor_model
+        if args.autolab_env_file is not None:
+            autolab_kwargs["harbor_env_file"] = args.autolab_env_file
+        optimizer = AutolabOptimizer(AutolabOptimizerConfig(**autolab_kwargs))
     else:
         optimizer = LocomoOptimizer(LocomoOptimizerConfig(**shared))
 

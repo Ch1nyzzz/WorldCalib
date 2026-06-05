@@ -117,6 +117,8 @@ def benchmark_skill_name(*, benchmark_name: str, target_system: str) -> str:
 
     benchmark = benchmark_name.lower()
     target = target_system.lower()
+    if "autolab" in benchmark or "autolab" in target or "harbor" in target:
+        return "autolab"
     if "terminal-bench" in benchmark or "terminus" in target:
         return "terminus"
     if "swe-bench" in benchmark or "mini_swe" in target or "miniswe" in target:
