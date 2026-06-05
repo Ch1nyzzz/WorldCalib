@@ -1,6 +1,6 @@
 ---
 name: worldcalib-proposer-agentic-bestofn-addon
-description: Best-of-N calibration layer (self-distill WMC, NO external critic) for the single-proposer / external-selector variant. Same world_model_calibration.md protocol and two-sided prediction as the calib addon, but the proposer designs and FULLY IMPLEMENTS N distinct candidates (each in its own ./cand_<i>/ dir with its own prediction.md) and does NOT self-select — an independent selector picks the winner. Included by every per-task agentic bestofn skill immediately after _base_core.md.
+description: Best-of-N calibration layer (self-distill WMC, NO external critic) for the single-proposer / external-selector variant. Same world_model_calibration.md protocol and per-task pass↔fail prediction as the calib addon, but the proposer designs and FULLY IMPLEMENTS N distinct candidates (each in its own ./cand_<i>/ dir with its own prediction.md predicting concrete per-task_id flips, NOT score/passrate deltas) and does NOT self-select — an independent selector picks the winner. Included by every per-task agentic bestofn skill immediately after _base_core.md.
 ---
 
 ## Self-distill best-of-N calibration protocol (WorldCalib — NO external critic)
@@ -41,20 +41,22 @@ by you (the proposer) AND by the selector — both reason from the same file.
 a. `cat ./runtime_config.md` for the ground-truth target model/base_url.
 b. `cat ./world_model_calibration.md`. If missing, abort and report.
 c. If `./prev_prediction.md` exists (iter ≥ 1): read it (the previous iter's
-   selected winner's bet), then read that iter's **real** outcome from
-   `candidate_results/<id>.json` — the `score_breakdown` (per task-type) or the
-   per-episode `tasks[]` `score`/`passed` rows — plus the trace evidence.
-   **Self-grade**: for each category you named under Upside, did it improve
-   (Δ > +0.02, or a fail→pass flip)? For each Downside, did it regress
-   (Δ < −0.02, or a pass→fail flip)? Which categories/episodes regressed that
-   you did NOT name (blind spots)? Was the Net-bet direction right? Then append:
+   selected winner's bet), then read that iter's **real per-task** outcome from
+   `candidate_results/<id>.json` — the `tasks[]` rows (each task's `task_id` +
+   `score`/`passed`) — compared against the **base iter's** `tasks[]`, plus the
+   trace evidence. **Self-grade per task**: for each `task_id` the winner
+   predicted to flip (fail→pass or pass→fail), did it actually flip? Which tasks
+   flipped **pass→fail that were NOT named** (blind spots)? Did any task the winner
+   called **`model-limited` flip to pass**? For each wrong call, what does the
+   trace say went differently? Then append:
 
    ```
    ## iter_<PREV> -> iter_<THIS> distill (<ISO-8601 UTC>)
-   - Prediction check (self): Upside hit X/Y; Downside named Z, regressed W; blind-spot regressions: <categories>
-   - Outcome mismatch: <which predicted per-category direction diverged; cite the score_breakdown numbers>
-   - Unresolved: <what this iter's evidence could not tell us>
-   - Belief update: <one sentence revising the world model so the next prediction is better>
+   - Per-task check (self): predicted flips hit X/Y — called right: <task_ids>; called wrong: <task_ids>
+   - Blind-spot regressions: <task_ids that flipped pass→fail and were NOT predicted>
+   - Model-limited overruled: <task_ids called model-limited that nonetheless flipped to pass — these were solvable after all>
+   - Why mispredicted: <for each wrong call, the trace reason the real outcome differed>
+   - Belief update: <one sentence revising the world model so the next per-task prediction is better>
    ```
 
    If `./prev_prediction.md` is absent (iter 0 had no proposer), skip the append.
@@ -75,8 +77,11 @@ For **each** candidate `i` (i = 1, 2, 3):
    backend `base.py` only if a shared helper is genuinely needed). Each
    `./cand_<i>/source_snapshot/` is a complete, independently-loadable copy — do
    not share edits across candidates.
-2. **Write its prediction** to `./cand_<i>/prediction.md`, using the world model,
-   in exactly this shape (the selector and the next-iter self-grade read it):
+2. **Write its prediction** to `./cand_<i>/prediction.md`, using the world model.
+   Predict at the **task level**: state the concrete effect of THIS candidate's
+   change on the **specific tasks it touches**, each line tied to that task's own
+   trace evidence. Use exactly this shape (the selector and the next-iter
+   self-grade read it):
 
    ```
    # iter_<THIS> cand_<i> prediction
@@ -84,17 +89,26 @@ For **each** candidate `i` (i = 1, 2, 3):
    ## Base — the prior iter this candidate builds on (exact, e.g. iter_4, or `clean`)
    ## Why this change & why it optimizes the whole system
    <the policy edit, the failure mode it attacks, and why the mechanism generalizes to unfamiliar episodes — a general mechanism, not a per-episode patch>
-   ## Mechanism (why it should move the metric)
-   ## Upside — categories this should IMPROVE (and why)
-   - <category>: <why>
-   ## Downside — categories that might REGRESS (and why)
-   - <category>: <why>  (an empty Downside is a red flag)
-   ## Net bet
-   - Overall train passrate Δ: [low, high]
-   - Why upside > downside
+   ## Mechanism — the behavioral change, and the failure mode (from the traces) it attacks
+   ## Per-task effects — the falsifiable prediction
+   # List ONLY tasks you expect to CHANGE (a pass↔fail flip), plus any at-risk task
+   # this candidate is deliberately protecting. One line per task, tied to its trace.
+   - <task_id>: fail→pass — <the specific failure in this task's trace the mechanism fixes>
+   - <task_id>: pass→fail — <why this task is now at risk>
+   - <task_id>: pass→pass (protected) — <why this at-risk task stays safe>   [optional]
+   ## Model-limited (tasks no harness change can solve)
+   # Where the trace shows the model itself lacks the reasoning/knowledge — mark it
+   # here rather than listing it as fail→pass.
+   - <task_id>: model-limited — <the capability the trace shows the model lacks>
    ## Falsification
-   <which predicted gain/regression, if absent, refutes the mechanism>
+   <which named per-task flips, if they do NOT happen, refute the mechanism>
    ```
+
+   Ground each flip in a specific cause in that task's trace, and read the
+   `task_id`s from the prior `candidate_results/<id>.json` `tasks[]`. Where the
+   trace shows the model itself cannot solve a task, mark it `model-limited`. The
+   prediction names tasks; the **code stays general** — never branch on a
+   `task_id` or embed an answer.
 
 3. **Smoke check** the candidate's edited snapshot (syntax/import).
 
@@ -117,14 +131,10 @@ loaded from the right implementation:
 ]}
 ```
 
-A **category** is whatever resolution the task tail below specifies:
+Every candidate predicts at the **individual task** resolution: name the specific
+`task_id`s (e.g. `os#3`) you expect to flip pass↔fail, read from the prior
+`candidate_results/<id>.json` `tasks[]`. There is no aggregate / per-category /
+score-Δ prediction.
 
-- **task-type tasks** (e.g. tau2, DB): use the **task-type labels exactly as
-  they appear** in the previous `score_breakdown` keys; predict at the category
-  level, not per individual episode.
-- **per-episode tasks** (e.g. OS, WebShop, ALFWorld — no dataset task-type):
-  name the specific episode `task_id`s (e.g. `os#3`) you expect to flip
-  pass↔fail, read from the prior `candidate_results/<id>.json` `tasks[]`.
-
-Next iter you self-grade the **selected winner's** prediction against the real
-outcome.
+Next iter you self-grade the **selected winner's** per-task prediction against the
+real per-task outcome.

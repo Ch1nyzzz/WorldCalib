@@ -1,6 +1,6 @@
 ---
 name: worldcalib-proposer-reasoning-calib-addon
-description: Calibration layer (self-distill world-model calibration, NO external critic) layered ONTO the base reasoning proposer contract — the append-only world_model_calibration.md protocol, prev_prediction.md, the two-sided Upside/Downside prediction.md template, the per-task-type granularity rule, and the self-grade distill block. Included by the reasoning_calib arm immediately after _base_core.md.
+description: Calibration layer (self-distill world-model calibration, NO external critic) layered ONTO the base reasoning proposer contract — the append-only world_model_calibration.md protocol, prev_prediction.md, the per-task pass↔fail prediction.md template (predict concrete per-task_id flips, NOT score/passrate deltas), and the per-task self-grade distill block. Included by the reasoning_calib arm immediately after _base_core.md.
 ---
 
 ## Self-distill calibration protocol (WorldCalib — NO external critic)
@@ -19,12 +19,12 @@ prediction per iter.
   against the real outcome.
 - **Per iter, your bet: `./prediction.md`** (written BEFORE editing source).
 
-**Predicting per task-type is not overfitting.** Naming which grid-size-change
-task-types your change should improve or regress is a *calibration judgement
-about a general mechanism* — which categories a general change is likely to
-flip — and is distinct from overfitting: the runtime solver must never branch on
-a saved task id / index or embed a task's answer. The prediction may name
-categories; the code may not.
+**Predicting per puzzle is not overfitting.** You will name specific puzzle
+`task_id`s your change should solve or break. That is a *calibration judgement
+about a general mechanism* — which puzzles a general change is likely to flip —
+and is distinct from overfitting: the runtime solver must never branch on a saved
+task id / index or embed a puzzle's answer. The prediction may name puzzles; the
+code may not.
 
 ## How this layers onto the base Workflow
 
@@ -36,19 +36,21 @@ base `Design & implement` step**, write `prediction.md`.
 a. `cat ./runtime_config.md` for the ground-truth target model/base_url.
 b. `cat ./world_model_calibration.md`. If missing, abort and report.
 c. If `./prev_prediction.md` exists (iter ≥ 1): read it, then read the previous
-   iter's **real** outcome from `candidate_results/<id>.json` — the
-   `score_breakdown` (per task-type) — plus the trace evidence. **Self-grade**:
-   for each task-type category you listed under Upside, did it improve
-   (Δ > +0.02 vs your declared base)? For each Downside, did it regress
-   (Δ < −0.02)? Which categories regressed that you did NOT name (blind spots)?
-   Was your Net-bet direction right? Then append:
+   iter's **real per-task** outcome from `candidate_results/<id>.json` — the
+   `tasks[]` rows (each puzzle's `task_id` + `score`/`passed`) — compared against
+   the **base iter's** `tasks[]`, plus the trace evidence. **Self-grade per
+   task**: for each `task_id` you predicted to flip (fail→pass or pass→fail), did
+   it actually flip? Which puzzles flipped **pass→fail that you did NOT name**
+   (blind spots)? Did any puzzle you called **`model-limited` flip to pass**? For
+   each wrong call, what does the trace say went differently? Then append:
 
    ```
    ## iter_<PREV> -> iter_<THIS> distill (<ISO-8601 UTC>)
-   - Prediction check (self): Upside hit X/Y; Downside named Z, regressed W; blind-spot regressions: <categories>
-   - Outcome mismatch: <which predicted per-category direction diverged; cite the score_breakdown numbers>
-   - Unresolved: <what this iter's evidence could not tell us>
-   - Belief update: <one sentence revising the world model so the next prediction is better>
+   - Per-task check (self): predicted flips hit X/Y — called right: <task_ids>; called wrong: <task_ids>
+   - Blind-spot regressions: <task_ids that flipped pass→fail and were NOT predicted>
+   - Model-limited overruled: <task_ids called model-limited that nonetheless flipped to pass — these were solvable after all>
+   - Why mispredicted: <for each wrong call, the trace reason the real outcome differed>
+   - Belief update: <one sentence revising the world model so the next per-task prediction is better>
    ```
 
    If `./prev_prediction.md` is absent (iter 0 had no proposer), skip the append
@@ -57,23 +59,31 @@ d. Re-read `./world_model_calibration.md` so the rest reasons from the latest.
 
 ### Before Design — write the self-graded bet `./prediction.md`
 
+Predict at the **puzzle level**: name the specific puzzles your change flips and
+tie each to that puzzle's trace evidence.
+
 ```
 # iter_<THIS> prediction
 ## Candidate (one line)
 ## Base — the prior iter you rebuilt on (exact, e.g. iter_4, or `clean` for the seed)
-## Mechanism (why it should move the metric)
-## Upside — task-type categories this should IMPROVE (and why)
-- <category>: <why>
-## Downside — task-type categories that might REGRESS (and why)
-- <category>: <why>  (an empty Downside is a red flag)
-## Net bet
-- Overall train passrate Δ: [low, high]
-- Why upside > downside
+## Why this change & why it optimizes the whole system
+<the policy edit, the failure mode it attacks, and why the mechanism generalizes to unfamiliar puzzles — a general mechanism, not a per-puzzle hardcode>
+## Mechanism — the behavioral change, and the failure mode (from the traces) it attacks
+## Per-task effects — the falsifiable prediction
+# List ONLY puzzles you expect to CHANGE (a pass↔fail flip), plus any at-risk
+# puzzle you are deliberately protecting. One line per task, tied to its trace.
+- <task_id>: fail→pass — <the specific failure in this puzzle's trace the mechanism fixes>
+- <task_id>: pass→fail — <why this puzzle is now at risk>
+- <task_id>: pass→pass (protected) — <why this at-risk puzzle stays safe>   [optional]
+## Model-limited (puzzles no harness change can solve)
+# Where the trace shows the model itself lacks the reasoning — mark it here
+# rather than listing it as fail→pass.
+- <task_id>: model-limited — <the reasoning capability the trace shows the model lacks>
 ## Falsification
-<which predicted gain/regression, if absent, refutes the mechanism>
+<which named per-task flips, if they do NOT happen, refute the mechanism>
 ```
 
-A **category** is a grid-size-change **task-type**: use the **task-type labels
-exactly as they appear** in the previous `score_breakdown` keys (the task tail
-below lists the label family). Predict at the category level, not per individual
-task. Next iter you self-grade these against the real outcome.
+Ground each flip in that puzzle's trace, and read the `task_id`s from the prior
+`candidate_results/<id>.json` `tasks[]`. The prediction names puzzles; the **code
+stays general** — never branch on a `task_id` or embed an answer. Next iter you
+self-grade these flips against the real per-task outcome.
