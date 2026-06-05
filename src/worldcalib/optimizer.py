@@ -1169,6 +1169,16 @@ class LocomoOptimizer:
         so the selected winner is loadable by :meth:`_evaluate_proposed`.
         """
 
+        # Archive the proposer's EDITED source snapshot, then rewrite the
+        # candidate's source paths to it. The rewrite only remaps path strings;
+        # without this copy the winner would point at a non-existent archive and
+        # fail to load (candidate_import_failed).
+        archived_snapshot = call_dir / "source_snapshot"
+        edited_snapshot = workspace_dir / "source_snapshot"
+        if edited_snapshot.exists():
+            if archived_snapshot.exists():
+                shutil.rmtree(archived_snapshot)
+            shutil.copytree(edited_snapshot, archived_snapshot)
         self._normalize_workspace_candidate_paths(
             raw,
             workspace_dir=workspace_dir,
@@ -1177,7 +1187,7 @@ class LocomoOptimizer:
         self._rewrite_workspace_source_paths_to_archive(
             raw,
             workspace_dir=workspace_dir,
-            archived_source_snapshot=call_dir / "source_snapshot",
+            archived_source_snapshot=archived_snapshot,
         )
         raw.setdefault("source_family", self.config.progressive_target_system)
         raw.setdefault("budget", budget)
@@ -2382,6 +2392,36 @@ class LocomoOptimizer:
                 return load_score_breakdown(hits[0])
         return {}
 
+    def _calib_base_task_outcomes(
+        self, parsed, existing_candidates: list[CandidateResult]
+    ) -> dict:
+        """Per-task ``{task_id: passed}`` of the base the prediction is measured
+        against. Same base resolution as :meth:`_calib_base_breakdown` (declared
+        iter_<N> → that iter; clean/missing → iter-0 seed baseline), but returns
+        the per-task outcomes the per-task flip grader needs."""
+        from worldcalib.prediction_feedback import load_task_outcomes
+
+        if getattr(parsed, "base_iter", None) is not None:
+            hits = sorted(
+                (self.run_dir / "candidate_results").glob(
+                    f"iter{parsed.base_iter:03d}*.json"
+                )
+            )
+            if hits:
+                return load_task_outcomes(hits[0])
+        for c in existing_candidates:
+            cid = getattr(c, "candidate_id", "") or ""
+            if not cid.startswith("iter"):
+                p = self._calib_result_path(c)
+                if p:
+                    return load_task_outcomes(p)
+        if self.config.baseline_dir:
+            bdir = Path(self.config.baseline_dir) / "candidate_results"
+            hits = sorted(bdir.glob("*.json")) if bdir.exists() else []
+            if hits:
+                return load_task_outcomes(hits[0])
+        return {}
+
     def _calib_critic_grade(
         self,
         iteration: int,
@@ -2495,7 +2535,7 @@ class LocomoOptimizer:
         try:
             from worldcalib.prediction_feedback import (
                 evaluate_prediction,
-                load_score_breakdown,
+                load_task_outcomes,
                 parse_prediction,
             )
 
@@ -2506,9 +2546,11 @@ class LocomoOptimizer:
             parsed = parse_prediction(pred_text)
             base_iter = parsed.base_iter
             cand_path = self._calib_result_path(evaluated[0])
-            cand_bd = load_score_breakdown(cand_path) if cand_path else {}
-            base_bd = self._calib_base_breakdown(parsed, existing_candidates)
-            metrics = evaluate_prediction(pred_text, cand_bd, base_bd)
+            cand_outcomes = load_task_outcomes(cand_path) if cand_path else {}
+            base_outcomes = self._calib_base_task_outcomes(parsed, existing_candidates)
+            # Per-task flip grading: predicted task_id flips vs real flips
+            # (candidate tasks[] vs the declared base's tasks[]).
+            metrics = evaluate_prediction(pred_text, cand_outcomes, base_outcomes)
             score, reasoning = self._calib_critic_grade(
                 iteration, pred_text, metrics, workspace_dir
             )
@@ -2522,44 +2564,42 @@ class LocomoOptimizer:
                 "## Critic reasoning",
                 reasoning or "(none)",
                 "",
-                "## Mechanical signals (vs your declared base)",
-                f"- upside hit rate: {metrics.get('upside_hit_rate')}",
-                f"- downside recall: {metrics.get('downside_recall')}",
-                f"- surprise regressions (you did NOT name): "
-                f"{metrics.get('surprise_regressions')}",
-                f"- net-bet direction correct: {metrics.get('net_bet_correct')} "
-                f"(overall Δ {metrics.get('overall_delta')})",
-                f"- you predicted improve: {metrics.get('predicted_upside')}",
-                f"- actually improved: {metrics.get('actually_improved')}",
-                f"- actually regressed: {metrics.get('actually_regressed')}",
+                "## Mechanical signals (per-task flips vs your declared base)",
+                f"- flip hit rate: {metrics.get('flip_hit_rate')} "
+                f"({metrics.get('n_flip_hits')}/{metrics.get('n_predicted_flips')} predicted flips landed)",
+                f"- blind-spot regressions (pass→fail you did NOT name): "
+                f"{metrics.get('blind_spot_regressions')}",
+                f"- false flips (predicted but did NOT happen): {metrics.get('false_flips')}",
+                f"- you predicted fail→pass: {metrics.get('predicted_fail_to_pass')}",
+                f"- actually flipped fail→pass: {metrics.get('actual_fail_to_pass')}",
+                f"- actually flipped pass→fail: {metrics.get('actual_pass_to_fail')}",
+                f"- net real flips (gains − regressions): {metrics.get('net_real_flips')}",
                 "",
-                "Use this to update your world model so next iter's prediction is "
-                "better — especially the surprise regressions.",
+                "Use this to update your world model so next iter's per-task "
+                "prediction is better — especially the blind-spot regressions.",
             ]
             fb.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
             # Append to the cumulative grading ledger (critic's scale anchor for
             # next iter). critic_score and the mechanical metrics are tracked in
-            # SEPARATE columns — they are two distinct measures (subjective LLM
-            # grade vs objective set-membership metrics) and are analysed apart.
+            # SEPARATE columns — subjective LLM grade vs objective per-task flips.
             ledger_path = self.run_dir / "prediction_grades.md"
             reason1 = (reasoning or "").strip().split("\n")[0][:160]
             if not ledger_path.exists():
                 ledger_path.write_text(
                     "# Prediction grading ledger (consistent-scale anchor)\n\n"
-                    "| iter | critic_score | upside_hit | down_recall | "
-                    "surprise | net_ok | overallΔ | base | reason |\n"
-                    "|---|---|---|---|---|---|---|---|---|\n",
+                    "| iter | critic_score | flip_hit | n_pred | blind_spots | "
+                    "net_real | base | reason |\n"
+                    "|---|---|---|---|---|---|---|---|\n",
                     encoding="utf-8",
                 )
             with ledger_path.open("a", encoding="utf-8") as fh:
                 fh.write(
                     f"| {iteration} | {score} | "
-                    f"{metrics.get('upside_hit_rate')} | "
-                    f"{metrics.get('downside_recall')} | "
-                    f"{metrics.get('n_surprise_regressions')} | "
-                    f"{metrics.get('net_bet_correct')} | "
-                    f"{metrics.get('overall_delta')} | "
+                    f"{metrics.get('flip_hit_rate')} | "
+                    f"{metrics.get('n_predicted_flips')} | "
+                    f"{metrics.get('n_blind_spot_regressions')} | "
+                    f"{metrics.get('net_real_flips')} | "
                     f"{parsed.base_raw or 'n/a'} | {reason1} |\n"
                 )
 
@@ -2568,13 +2608,13 @@ class LocomoOptimizer:
                     "iteration": iteration,
                     "event": "prediction_score",
                     # subjective LLM grade — tracked separately from the
-                    # objective mechanical metrics below
+                    # objective per-task flip metrics below
                     "critic_score": score,
-                    "upside_hit_rate": metrics.get("upside_hit_rate"),
-                    "downside_recall": metrics.get("downside_recall"),
-                    "n_surprise_regressions": metrics.get("n_surprise_regressions"),
-                    "net_bet_correct": metrics.get("net_bet_correct"),
-                    "overall_delta": metrics.get("overall_delta"),
+                    "flip_hit_rate": metrics.get("flip_hit_rate"),
+                    "n_predicted_flips": metrics.get("n_predicted_flips"),
+                    "n_flip_hits": metrics.get("n_flip_hits"),
+                    "n_blind_spot_regressions": metrics.get("n_blind_spot_regressions"),
+                    "net_real_flips": metrics.get("net_real_flips"),
                     "base_iter": base_iter,
                     "base_raw": parsed.base_raw,
                 }
