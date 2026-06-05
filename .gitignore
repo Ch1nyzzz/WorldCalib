@@ -18,3 +18,9 @@ data/longmemeval/
 
 # Cloned upstream benchmarks (AgentBench, etc.) — not vendored into this repo's git
 third_party/
+
+# Vendored upstream agents (mini-swe-agent, etc.) — large, not tracked in this repo's git
+references/
+
+# SWE-bench instance data — large (~50MB), fetched/derived, not tracked
+data/swebench_*.json

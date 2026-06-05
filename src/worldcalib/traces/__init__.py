@@ -48,12 +48,14 @@ from .adapters.locomo import LocomoAdapter
 from .adapters.agentbench import AgentBenchAdapter
 from .adapters.tau2 import Tau2Adapter
 from .adapters.arc import ArcAdapter
+from .adapters.swebench import SwebenchAdapter
 
 register_adapter(LongMemEvalAdapter())
 register_adapter(LocomoAdapter())
 register_adapter(AgentBenchAdapter())
 register_adapter(Tau2Adapter())
 register_adapter(ArcAdapter())
+register_adapter(SwebenchAdapter())
 
 __all__ = [
     "ALL_STATUSES",
