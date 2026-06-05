@@ -55,8 +55,26 @@ mkdir -p logs runs
 run_id="locomo_claudekimi_k26_maxeffort_target_deepseek_v4_flash_calib_bestofn3_iter${ITERATIONS}_${TS}"
 log_path="logs/${run_id}.log"
 status_file="logs/launch_bestofn_locomo_${TS}.status"
-printf '[%s] START %s variant=calib iter=%s baseline=self-eval-iter0\n[%s] LOG %s\n' \
-  "$(date -Is)" "$run_id" "$ITERATIONS" "$(date -Is)" "$log_path" \
+
+# Aligned iter-0: clone a FIXED iter-0 seed (full per-episode evidence) and
+# continue from iter 1 via --skip-scaffold-eval, instead of self-evaluating a
+# fresh (variance-laden, unaligned) iter-0. Default seed = the same baseline the
+# 0.47 reference run started from.
+SEED_FROM="${SEED_FROM:-$BASELINE_LOCOMO_DIR}"
+SEED_ARG=()
+if [ -n "$SEED_FROM" ]; then
+  if [ ! -d "$SEED_FROM/candidate_results" ]; then
+    printf 'fatal: SEED_FROM=%q has no candidate_results/ (not an iter-0 seed)\n' "$SEED_FROM" >&2
+    exit 2
+  fi
+  mkdir -p "runs/${run_id}"
+  cp -a "$SEED_FROM"/. "runs/${run_id}/"
+  rm -f "runs/${run_id}/optimizer_summary.json" "runs/${run_id}/run_summary.json"
+  SEED_ARG=(--skip-scaffold-eval)
+fi
+
+printf '[%s] START %s variant=calib iter=%s seed_from=%s\n[%s] LOG %s\n' \
+  "$(date -Is)" "$run_id" "$ITERATIONS" "$SEED_FROM" "$(date -Is)" "$log_path" \
   | tee "$status_file"
 
 setsid worldcalib-optimize \
@@ -68,6 +86,7 @@ setsid worldcalib-optimize \
   --no-summary \
   --run-id "$run_id" \
   --out "runs/${run_id}" \
+  "${SEED_ARG[@]}" \
   --iterations "$ITERATIONS" \
   --split train \
   --eval-workers "$EVAL_WORKERS" \
