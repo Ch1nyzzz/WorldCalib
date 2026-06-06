@@ -386,6 +386,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Path to the AutoLab 36-task dir (default: third_party/autolab/tasks).",
     )
+    parser.add_argument(
+        "--autolab-terminus2-source",
+        type=Path,
+        default=None,
+        help=(
+            "Editable terminus-2 source root (parent of the terminus_2/ package) "
+            "the proposer snapshots and edits. Default: references/vendor/terminus2_agent."
+        ),
+    )
     parser.add_argument("--autolab-harbor-python", type=Path, default=None)
     parser.add_argument("--autolab-harbor-binary", type=Path, default=None)
     parser.add_argument("--autolab-agent", default="terminus-2")
@@ -627,6 +636,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         if args.autolab_tasks_path is not None:
             autolab_kwargs["tasks_path"] = args.autolab_tasks_path
+        if args.autolab_terminus2_source is not None:
+            autolab_kwargs["terminus2_source_path"] = args.autolab_terminus2_source
         if args.autolab_harbor_python is not None:
             autolab_kwargs["harbor_python"] = args.autolab_harbor_python
         if args.autolab_harbor_binary is not None:
