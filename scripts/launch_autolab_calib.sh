@@ -127,7 +127,21 @@ TASKS_PATH="${AUTOLAB_TASKS_PATH:-third_party/autolab/tasks}"
 HARBOR_BINARY="${AUTOLAB_HARBOR_BINARY:-/data/home/yuhan/cyh_dev/bin/harbor}"
 HARBOR_PYTHON="${AUTOLAB_HARBOR_PYTHON:-/data/home/yuhan/cyh_dev/bin/python}"
 HARBOR_MODEL="${AUTOLAB_HARBOR_MODEL:-deepseek-v4-pro[1m]}"
-HARBOR_ENV_FILE="${AUTOLAB_HARBOR_ENV_FILE:-.env}"
+# harbor --env-file: feed ONLY the resolved solver creds, NOT the repo .env. The
+# repo .env carries a separate OPENAI_API_KEY (often stale) that, passed verbatim,
+# is loaded by harbor's litellm and OVERRIDES the deepseek key we resolved above —
+# every model call then 401s and all tasks score 0. The runner already inherits the
+# full .env via the process env (launcher sourced it), so a minimal solver-only
+# env-file loses nothing and stops the clobber. Pin AUTOLAB_HARBOR_ENV_FILE to opt
+# back into a specific file.
+if [ -n "${AUTOLAB_HARBOR_ENV_FILE:-}" ]; then
+  HARBOR_ENV_FILE="$AUTOLAB_HARBOR_ENV_FILE"
+else
+  HARBOR_ENV_FILE="/tmp/worldcalib_solver_env_${TS}.env"
+  { printf 'OPENAI_API_KEY=%s\n' "$OPENAI_API_KEY"
+    printf 'OPENAI_BASE_URL=%s\n' "$OPENAI_BASE_URL"; } > "$HARBOR_ENV_FILE"
+  chmod 600 "$HARBOR_ENV_FILE"
+fi
 N_ATTEMPTS="${AUTOLAB_N_ATTEMPTS:-1}"
 TIMEOUT_MULT="${AUTOLAB_TIMEOUT_MULTIPLIER:-1.0}"
 HARBOR_CONC="${AUTOLAB_CONCURRENCY:-1}"
