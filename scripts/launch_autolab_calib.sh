@@ -45,7 +45,15 @@ fi
 KIMI_MODEL="${KIMI_MODEL:-kimi-k2.6}"
 
 unset DIFF_EMBEDDING_MODEL
-unset OPENAI_BASE_URL
+
+# Solver (terminus-2) reaches its model via litellm in the harbor HOST process.
+# For openai/* models (e.g. openai/deepseek-v4-flash) litellm reads OPENAI_API_KEY
+# + OPENAI_BASE_URL from this env — the seed candidate carries no api_base kwarg,
+# so the endpoint MUST come from here. Default to the deepseek endpoint. The kimi
+# proposer runs in docker with only the explicitly-listed --proposer-docker-env,
+# so these do not leak into it.
+export OPENAI_API_KEY="${SOLVER_OPENAI_API_KEY:-${DEEPSEEK_API_KEY:-${OPENAI_API_KEY:-}}}"
+export OPENAI_BASE_URL="${SOLVER_OPENAI_BASE_URL:-https://api.deepseek.com}"
 
 export ENABLE_TOOL_SEARCH=false
 export ANTHROPIC_DEFAULT_OPUS_MODEL="${KIMI_MODEL}"
