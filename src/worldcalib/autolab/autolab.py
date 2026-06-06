@@ -44,6 +44,18 @@ DEFAULT_HARBOR_PYTHON = Path("/data/home/yuhan/cyh_dev/bin/python")
 DEFAULT_HARBOR_BINARY = Path("/data/home/yuhan/cyh_dev/bin/harbor")
 DEFAULT_REWARD_GATE = 0.5
 
+# Editable-harness (Option B) surface. The proposer optimizes an editable COPY of
+# harbor's terminus-2 agent package (prompt templates + control flow). The copy
+# is a Python package ``terminus_2/`` living under a parent dir we put on
+# PYTHONPATH; harbor loads it via ``--agent-import-path`` instead of ``-a``.
+# DEFAULT_TERMINUS2_SOURCE is the vendored pristine copy (the seed/baseline);
+# proposed candidates carry an edited snapshot via ``agent_source_path``.
+DEFAULT_TERMINUS2_SOURCE = Path("references/vendor/terminus2_agent")
+TERMINUS2_IMPORT_PATH = "terminus_2.terminus_2:Terminus2"
+# Relative marker that makes a dir a valid terminus-2 source root (the parent of
+# the importable ``terminus_2`` package).
+_TERMINUS2_PKG_MARKER = Path("terminus_2") / "terminus_2.py"
+
 # How harbor's terminus-2 must be patched in the cyh_dev site-packages for all
 # 36 tasks to run. We grep the installed source for these post-patch markers and
 # fail fast (with a clear message) when they are absent. We do NOT mutate the
@@ -423,11 +435,13 @@ class AutolabHarborRunner:
         jobs_dir.mkdir(parents=True, exist_ok=True)
         job_name = f"{candidate_id}__{task.task_id}"[:96]
 
+        agent_source = self._candidate_agent_source_dir(candidate)
         argv = self._build_argv(
             task=task,
             candidate=candidate,
             jobs_dir=jobs_dir,
             job_name=job_name,
+            agent_source=agent_source,
         )
         (jobs_dir / "harbor_command.txt").write_text(
             " ".join(argv), encoding="utf-8"
@@ -442,7 +456,7 @@ class AutolabHarborRunner:
                 argv,
                 cwd=Path.cwd(),
                 timeout=per_task_timeout,
-                extra_env=self._subprocess_env(),
+                extra_env=self._subprocess_env(agent_source),
             )
             returncode = completed.returncode
             (jobs_dir / "harbor_stdout.txt").write_text(
@@ -570,6 +584,7 @@ class AutolabHarborRunner:
         candidate: Mapping[str, Any],
         jobs_dir: Path,
         job_name: str,
+        agent_source: Path | None = None,
     ) -> list[str]:
         model = str(candidate.get("model") or self.harbor_model)
         multiplier = float(candidate.get("timeout_multiplier") or self.timeout_multiplier)
@@ -580,8 +595,16 @@ class AutolabHarborRunner:
             str(task.path),
             "-i",
             task.task_id,
-            "-a",
-            self.harbor_agent,
+        ]
+        # Option B: if the candidate carries an editable terminus-2 source tree,
+        # load it via --agent-import-path (PYTHONPATH is set in _subprocess_env)
+        # instead of the installed `-a terminus-2`. The seed/baseline (no source)
+        # uses the installed agent.
+        if agent_source is not None:
+            argv += ["--agent-import-path", TERMINUS2_IMPORT_PATH]
+        else:
+            argv += ["-a", self.harbor_agent]
+        argv += [
             "-m",
             model,
             "-o",
@@ -605,11 +628,46 @@ class AutolabHarborRunner:
             argv += ["--ae", f"{key}={value}"]
         return argv
 
-    def _subprocess_env(self) -> dict[str, str]:
+    def _subprocess_env(self, agent_source: Path | None = None) -> dict[str, str]:
         env = dict(os.environ)
         if self.gpu_devices is not None:
             env["HARBOR_GPU_DEVICES"] = str(self.gpu_devices)
+        if agent_source is not None:
+            # Make the editable `terminus_2` package importable by the cyh_dev
+            # harbor process so --agent-import-path terminus_2.terminus_2 resolves
+            # to the EDITED copy, not the installed one. Prepend so it wins.
+            prev = env.get("PYTHONPATH", "")
+            env["PYTHONPATH"] = (
+                f"{agent_source}{os.pathsep}{prev}" if prev else str(agent_source)
+            )
         return env
+
+    def _candidate_agent_source_dir(self, candidate: Mapping[str, Any]) -> Path | None:
+        """Resolve the editable terminus-2 source root from a candidate.
+
+        Returns the directory that CONTAINS the importable ``terminus_2`` package
+        (so it can go on PYTHONPATH), or ``None`` when the candidate carries no
+        source (seed/baseline → installed ``-a terminus-2``). Raises when a source
+        is named but is not a valid terminus-2 tree, so a broken candidate fails
+        loudly rather than silently grading the unedited baseline.
+        """
+
+        extra = candidate.get("extra") if isinstance(candidate.get("extra"), Mapping) else {}
+        raw = None
+        for key in ("agent_source_path", "source_project_path", "terminus2_source_path"):
+            raw = candidate.get(key) or extra.get(key)
+            if raw:
+                break
+        if not raw:
+            return None
+        path = Path(str(raw)).expanduser()
+        if not (path / _TERMINUS2_PKG_MARKER).is_file():
+            raise FileNotFoundError(
+                f"candidate agent_source_path {path} is not a valid terminus-2 source root "
+                f"(missing {_TERMINUS2_PKG_MARKER}); expected the parent dir of the "
+                "terminus_2 package."
+            )
+        return path
 
     def _task_timeout(self, task: AutolabTask) -> int:
         """Per-``harbor run`` subprocess wall-clock ceiling.

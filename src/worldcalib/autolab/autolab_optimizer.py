@@ -13,6 +13,8 @@ docker container, and the candidate carries only config kwargs.
 from __future__ import annotations
 
 import json
+import logging
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -29,11 +31,19 @@ from worldcalib.autolab.autolab import (
     DEFAULT_HARBOR_BINARY,
     DEFAULT_HARBOR_PYTHON,
     DEFAULT_REWARD_GATE,
+    DEFAULT_TERMINUS2_SOURCE,
     AutolabHarborRunner,
     AutolabTask,
     load_autolab_tasks,
     run_autolab_frontier,
 )
+
+logger = logging.getLogger(__name__)
+
+# Where, inside a candidate source snapshot, the editable terminus-2 package
+# root lives (the parent dir of the importable ``terminus_2`` package). The
+# runner puts this dir on PYTHONPATH and loads it via --agent-import-path.
+_TERMINUS2_SNAPSHOT_RELROOT = Path("upstream_source") / "terminus2_agent"
 
 
 # AutoLab proposer workspace: a minimal importable source set (mirrors
@@ -66,6 +76,7 @@ class AutolabOptimizerConfig(OptimizerConfig):
     """Configuration for terminus-2 harness-config optimization on AutoLab."""
 
     tasks_path: Path = DEFAULT_AUTOLAB_TASKS_PATH
+    terminus2_source_path: Path = DEFAULT_TERMINUS2_SOURCE
     harbor_python: Path = DEFAULT_HARBOR_PYTHON
     harbor_binary: Path = DEFAULT_HARBOR_BINARY
     harbor_agent: str = DEFAULT_AUTOLAB_AGENT
@@ -168,6 +179,130 @@ class AutolabOptimizer(LocomoOptimizer):
             verify_patches=self.config.verify_patches,
         )
 
+    # -- editable terminus-2 source snapshot (Option B) ---------------------
+
+    def _terminus2_source_root(self) -> Path:
+        """Absolute path to the pristine terminus-2 source root (parent of the
+        importable ``terminus_2`` package)."""
+        p = Path(self.config.terminus2_source_path)
+        return p if p.is_absolute() else (self.project_root / p)
+
+    def _copy_upstream_source_context(self, source_family: str, dest_dir: Path) -> None:
+        """Seed an EDITABLE copy of the terminus-2 agent package into the
+        candidate snapshot so the proposer can reshape its prompt templates and
+        control flow. The runner loads the edited copy via --agent-import-path."""
+        super()._copy_upstream_source_context(source_family, dest_dir)
+        if source_family != self.config.progressive_target_system:
+            return
+        src_pkg = self._terminus2_source_root() / "terminus_2"
+        if not src_pkg.is_dir():
+            logger.warning(
+                "terminus-2 source package not found at %s; candidate snapshot "
+                "will have no editable agent (falls back to installed terminus-2).",
+                src_pkg,
+            )
+            return
+        dest_root = dest_dir / _TERMINUS2_SNAPSHOT_RELROOT
+        dest_root.mkdir(parents=True, exist_ok=True)
+        self._copy_tree_if_exists(src_pkg, dest_root / "terminus_2")
+
+    def _build_source_snapshot_workspace(
+        self,
+        *,
+        iteration: int,
+        source_family: str,
+        call_dir: Path,
+        target_system: str | None = None,
+        snapshot_root: Path | None = None,
+        generated_dir: Path | None = None,
+        base_iter: int | None = None,
+    ) -> Path:
+        snapshot_root = super()._build_source_snapshot_workspace(
+            iteration=iteration,
+            source_family=source_family,
+            call_dir=call_dir,
+            target_system=target_system,
+            snapshot_root=snapshot_root,
+            generated_dir=generated_dir,
+            base_iter=base_iter,
+        )
+        candidate_dir = snapshot_root / "candidate"
+        agent_root = candidate_dir / _TERMINUS2_SNAPSHOT_RELROOT
+        # CuraII lineage: when a parent base is supplied, replace the freshly
+        # baseline-seeded terminus-2 copy with the parent iteration's edited
+        # agent so the proposer edits on top of a previously evaluated candidate.
+        if base_iter is not None:
+            parent_agent = (
+                self._iteration_dir(base_iter)
+                / "source_snapshot"
+                / "candidate"
+                / _TERMINUS2_SNAPSHOT_RELROOT
+                / "terminus_2"
+            )
+            if parent_agent.is_dir():
+                if agent_root.exists():
+                    shutil.rmtree(agent_root)
+                agent_root.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(
+                    parent_agent,
+                    agent_root / "terminus_2",
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+                )
+        (candidate_dir / "SNAPSHOT_AUTOLAB.md").write_text(
+            "\n".join(
+                [
+                    "# AutoLab terminus-2 harness snapshot",
+                    "",
+                    f"Iteration: {iteration}",
+                    "",
+                    "The EDITABLE terminus-2 agent package is at:",
+                    f"  {_TERMINUS2_SNAPSHOT_RELROOT}/terminus_2/",
+                    "",
+                    "Edit its prompt templates (`templates/*.txt`) and/or control",
+                    "flow (`terminus_2.py`, parsers) to change agent behavior. Then in",
+                    "pending_eval.json set `extra.source_project_path` to the ABSOLUTE",
+                    "path of the package ROOT (the parent of `terminus_2/`):",
+                    f"  {agent_root}",
+                    "",
+                    "Do NOT touch any task's solution/ or tests/ or task.toml.",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        manifest_path = snapshot_root / "manifest.json"
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            manifest = {}
+        manifest["terminus2_source"] = str(agent_root)
+        manifest_path.write_text(
+            json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+        call_manifest = call_dir / "source_snapshot_manifest.json"
+        if call_manifest.exists():
+            call_manifest.write_text(
+                json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
+        return snapshot_root
+
+    def _normalize_candidate_agent_source_path(self, candidate: dict[str, Any]) -> None:
+        """Resolve the proposer's edited terminus-2 source root onto the candidate
+        as an absolute ``agent_source_path`` the runner consumes. Falls back to
+        the pristine vendored source (= baseline behavior) when none is given."""
+        if candidate.get("agent_source_path"):
+            return
+        extra = candidate.get("extra") if isinstance(candidate.get("extra"), dict) else {}
+        for key in ("agent_source_path", "source_project_path", "terminus2_source_path"):
+            value = candidate.get(key) or extra.get(key)
+            if value:
+                path = Path(str(value)).expanduser()
+                if not path.is_absolute():
+                    path = self.project_root / path
+                candidate["agent_source_path"] = str(path)
+                return
+        candidate["agent_source_path"] = str(self._terminus2_source_root())
+
     # -- proposed-candidate evaluation -------------------------------------
 
     def _evaluate_proposed(
@@ -189,6 +324,7 @@ class AutolabOptimizer(LocomoOptimizer):
             )
             candidate.setdefault("agent_name", agent_name)
             candidate.setdefault("scaffold_name", DEFAULT_AUTOLAB_SCAFFOLD_NAME)
+            self._normalize_candidate_agent_source_path(candidate)
 
             violations = self._candidate_code_policy_violations(candidate)
             if violations:

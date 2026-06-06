@@ -19,17 +19,27 @@ the *agent strategy wrapped around it* — the terminus-2 harness: how the agent
 prompted, how it is configured, and the agent kwargs it runs under. You do **not**
 write per-task solutions and you do **not** touch any task's files.
 
-The runtime candidate is the source-backed terminus-2 harness snapshot, loaded
-from the edited snapshot named in `extra.source_project_path`. The editable
-surface is the copied terminus-2 harness tree the iteration message names (plus
-the optional generated wrapper directory). Concretely you may:
+The runtime candidate is the source-backed terminus-2 harness snapshot. The
+editable surface is the copied terminus-2 Python package at
+`upstream_source/terminus2_agent/terminus_2/` — its prompt templates
+(`templates/terminus-json-plain.txt`, `templates/terminus-xml-plain.txt`), and
+the agent loop / parsers (`terminus_2.py`, `terminus_*_parser.py`). Harbor loads
+your EDITED copy via `--agent-import-path` (the runner puts the package root on
+PYTHONPATH); set `extra.source_project_path` to the ABSOLUTE package ROOT — the
+parent of `terminus_2/` — exactly as `SNAPSHOT_AUTOLAB.md` states. Concretely you
+may:
 
-- reshape the harness **prompt template** — the system / instruction framing, how
-  the task instruction and environment are presented, how prior steps and command
-  output are rendered, how the agent is told to plan, verify, and finalize;
-- adjust the harness **agent kwargs / config** the harness passes to terminus-2
-  (e.g. `prompt_template`, `version`, and other terminus-2 kwargs) as supporting
-  detail of a mechanism change — never as the substantive change on its own;
+- reshape the harness **prompt template** by editing the `templates/*.txt` files
+  — the system / instruction framing, how the task instruction and environment
+  are presented, how prior steps and command output are rendered, how the agent
+  is told to plan, verify, and finalize. (terminus-2 reads the template by
+  `parser_name`; editing the FILE is how you change the prompt — a
+  `prompt_template` agent-kwarg is ignored.)
+- set terminus-2 **agent kwargs** in `pending_eval.json`'s `agent_kwargs` (these
+  reach the agent constructor): `parser_name` (json|xml), `max_turns`,
+  `reasoning_effort`, `enable_summarize` / `proactive_summarization_threshold`,
+  `max_thinking_tokens`, `interleaved_thinking`, `temperature` — as supporting
+  detail of a mechanism change, never the substantive change on its own;
 - restructure the harness **control flow** where the snapshot exposes it — step
   budgeting, when/how the model is called, how command output is
   truncated/summarized/fed back, retries, and the stop/finalize decision;
@@ -62,8 +72,8 @@ The exact output path and JSON schema (with live substitutions) are in the
 iteration message. Independent of those:
 
 - The `candidates` array must contain **exactly one** candidate.
-- `extra.source_project_path` must point at the edited terminus-2 harness
-  snapshot the iteration message names.
+- `extra.source_project_path` must point at the ABSOLUTE terminus-2 package ROOT
+  (the parent of the edited `terminus_2/`), as named in `SNAPSHOT_AUTOLAB.md`.
 - If you create a wrapper module under the generated directory, keep it small and
   route harness mechanisms through the clean edited snapshot.
 - The `hypothesis` field must state: the observed failure mode being targeted,
