@@ -181,7 +181,23 @@ if [ "${AUTOLAB_SKIP_PATCH_CHECK:-0}" = "1" ]; then
 fi
 
 mkdir -p logs runs
-run_id="autolab_${PROPOSER_TAG}_${PROPOSER_VARIANT}_iter${ITERATIONS}_${TS}"
+
+# RESUME_RUN_ID: continue an existing run dir (e.g. after truncate_run_to_iter.py)
+# instead of starting a fresh run. The optimizer derives the resume start from
+# candidate_results/ (max completed iter + 1) and re-runs the rest; iter0 seed is
+# reused, not re-evaluated. ITERATIONS must match the original run's target.
+resume_args=()
+if [ -n "${RESUME_RUN_ID:-}" ]; then
+  run_id="$RESUME_RUN_ID"
+  if [ ! -d "runs/${run_id}/candidate_results" ]; then
+    printf 'fatal: RESUME_RUN_ID=%q has no runs/%s/candidate_results to resume from.\n' \
+      "$run_id" "$run_id" >&2
+    exit 2
+  fi
+  resume_args=(--resume)
+else
+  run_id="autolab_${PROPOSER_TAG}_${PROPOSER_VARIANT}_iter${ITERATIONS}_${TS}"
+fi
 
 # claude-native needs a per-run writable HOME holding a copy of the OAuth files
 # (mounting ~/.claude read-only fails; read-write would pollute the host login).
@@ -216,6 +232,7 @@ setsid worldcalib-optimize \
   --eval-timeout-s "$EVAL_TIMEOUT_S" \
   --propose-timeout-s "$PROPOSE_TIMEOUT_S" \
   --api-key EMPTY \
+  "${resume_args[@]}" \
   "${proposer_args[@]}" \
   > "$log_path" 2>&1 < /dev/null &
 
