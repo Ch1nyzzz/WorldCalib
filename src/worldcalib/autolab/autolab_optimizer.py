@@ -286,21 +286,70 @@ class AutolabOptimizer(LocomoOptimizer):
             )
         return snapshot_root
 
-    def _normalize_candidate_agent_source_path(self, candidate: dict[str, Any]) -> None:
+    def _normalize_candidate_agent_source_path(
+        self, candidate: dict[str, Any], iteration: int
+    ) -> None:
         """Resolve the proposer's edited terminus-2 source root onto the candidate
-        as an absolute ``agent_source_path`` the runner consumes. Falls back to
-        the pristine vendored source (= baseline behavior) when none is given."""
+        as an absolute ``agent_source_path`` the runner consumes.
+
+        The proposer reports ``extra.source_project_path`` as a free-form string
+        and is inconsistent about it: from its sandboxed workspace it often emits
+        a doubled / workspace-relative path that does not resolve to a real
+        package (run …_160424: 4 of 5 iters emitted a self-doubled path and were
+        silently dropped pre-eval). The edited source itself always lands at the
+        canonical per-iteration snapshot path the optimizer wrote, so validate
+        the emitted path and fall back to that canonical root before giving up to
+        the pristine vendored source (= baseline behavior)."""
+
+        def _valid(p: Path) -> bool:
+            return (p / "terminus_2" / "terminus_2.py").is_file()
+
+        def _abs(value: object) -> Path:
+            p = Path(str(value)).expanduser()
+            return p if p.is_absolute() else (self.project_root / p)
+
+        # An already-set agent_source_path is authoritative only if it resolves.
         if candidate.get("agent_source_path"):
-            return
+            p = _abs(candidate["agent_source_path"])
+            if _valid(p):
+                candidate["agent_source_path"] = str(p)
+                return
+
         extra = candidate.get("extra") if isinstance(candidate.get("extra"), dict) else {}
+        emitted: object | None = None
         for key in ("agent_source_path", "source_project_path", "terminus2_source_path"):
             value = candidate.get(key) or extra.get(key)
             if value:
-                path = Path(str(value)).expanduser()
-                if not path.is_absolute():
-                    path = self.project_root / path
-                candidate["agent_source_path"] = str(path)
-                return
+                emitted = value
+                path = _abs(value)
+                if _valid(path):
+                    candidate["agent_source_path"] = str(path)
+                    return
+                break
+
+        # Emitted path missing/invalid → recover from the canonical snapshot root
+        # the optimizer built for this iteration (the proposer's edits live there
+        # regardless of the path string it reported), so a malformed path never
+        # silently discards a real edited candidate.
+        canonical = (
+            self._iteration_dir(iteration)
+            / "source_snapshot"
+            / "candidate"
+            / _TERMINUS2_SNAPSHOT_RELROOT
+        )
+        if _valid(canonical):
+            if emitted is not None:
+                self._append_event(
+                    {
+                        "iteration": iteration,
+                        "event": "agent_source_path_recovered",
+                        "emitted": str(emitted),
+                        "resolved": str(canonical),
+                    }
+                )
+            candidate["agent_source_path"] = str(canonical)
+            return
+
         candidate["agent_source_path"] = str(self._terminus2_source_root())
 
     # -- proposed-candidate evaluation -------------------------------------
@@ -324,7 +373,7 @@ class AutolabOptimizer(LocomoOptimizer):
             )
             candidate.setdefault("agent_name", agent_name)
             candidate.setdefault("scaffold_name", DEFAULT_AUTOLAB_SCAFFOLD_NAME)
-            self._normalize_candidate_agent_source_path(candidate)
+            self._normalize_candidate_agent_source_path(candidate, iteration)
 
             violations = self._candidate_code_policy_violations(candidate)
             if violations:
