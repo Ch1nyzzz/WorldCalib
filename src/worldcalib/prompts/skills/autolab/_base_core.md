@@ -30,14 +30,17 @@ harness broadly. You cannot tell the difference from the train score, so:
 
 ## Search space
 
-The search space is the candidate source itself — the terminus-2 harness in the
-editable surface described above (prompt template, agent kwargs/config, and any
-control flow the snapshot exposes). Exploitation (refining the current mechanism)
-and exploration (a structurally different mechanism) are both valid moves. Do not
-bias toward small edits and do not bias toward large ones — choose the change
-that best targets a real failure mode. A genuinely new mechanism — a different
-control-loop topology, context strategy, verification step, or information-flow
-structure — is a first-class candidate, not a last resort.
+The search space is the candidate source itself — the whole agent in the editable
+surface described above: the `BaseAgent` implementation in `terminus_2/`, which
+you may keep, modify, or replace wholesale (only the `BaseAgent` interface is
+fixed). That includes its control loop, what state persists across steps/attempts,
+how/when it verifies/retries/finalizes, its prompts, and any `agent_kwargs`.
+Exploitation (refining the current mechanism) and exploration (a structurally
+different agent) are both valid moves. Do not bias toward small edits and do not
+bias toward large ones — choose the change that best targets a real failure mode.
+A genuinely new mechanism — a different control-loop topology, what is remembered
+across attempts, a verification/retry scheme, or information-flow structure — is a
+first-class candidate, not a last resort.
 
 ## Subagents
 
