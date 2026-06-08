@@ -205,6 +205,16 @@ class AutolabOptimizer(LocomoOptimizer):
         dest_root = dest_dir / _TERMINUS2_SNAPSHOT_RELROOT
         dest_root.mkdir(parents=True, exist_ok=True)
         self._copy_tree_if_exists(src_pkg, dest_root / "terminus_2")
+        # Read-only harbor interface contract (BaseAgent / BaseEnvironment /
+        # AgentContext / LiteLLM …). The proposer's sandbox has no harbor install,
+        # so without these it cannot design a from-scratch agent against the real
+        # interface. Placed OUTSIDE the importable terminus_2 package (reference
+        # only, never on PYTHONPATH).
+        contract_src = self._terminus2_source_root() / "harbor_contract"
+        if contract_src.is_dir():
+            self._copy_tree_if_exists(
+                contract_src, dest_dir / "upstream_source" / "harbor_contract"
+            )
 
     def _build_source_snapshot_workspace(
         self,
@@ -251,20 +261,44 @@ class AutolabOptimizer(LocomoOptimizer):
         (candidate_dir / "SNAPSHOT_AUTOLAB.md").write_text(
             "\n".join(
                 [
-                    "# AutoLab terminus-2 harness snapshot",
+                    "# AutoLab agent harness snapshot",
                     "",
                     f"Iteration: {iteration}",
                     "",
-                    "The EDITABLE terminus-2 agent package is at:",
+                    "You are designing the AGENT HARNESS that AutoLab runs against",
+                    "each task. The EDITABLE agent package is at:",
                     f"  {_TERMINUS2_SNAPSHOT_RELROOT}/terminus_2/",
                     "",
-                    "Edit its prompt templates (`templates/*.txt`) and/or control",
-                    "flow (`terminus_2.py`, parsers) to change agent behavior. Then in",
-                    "pending_eval.json set `extra.source_project_path` to the ABSOLUTE",
-                    "path of the package ROOT (the parent of `terminus_2/`):",
+                    "`terminus_2/terminus_2.py` is the CURRENT implementation — a",
+                    "REFERENCE you may keep, modify, or REPLACE WHOLESALE. Its whole",
+                    "agent loop (how the model is called, how commands run, how output",
+                    "is fed back, how/when it retries, what state persists across",
+                    "attempts, when it finalizes) is yours to redesign. The only fixed",
+                    "contract is the harbor `BaseAgent` interface: keep the entry class",
+                    "`class Terminus2(BaseAgent)` in `terminus_2/terminus_2.py` and",
+                    "implement `name()`, `version()`, `async setup(environment)`, and",
+                    "`async run(instruction, environment, context)`. Everything inside",
+                    "`run()` is free.",
+                    "",
+                    "The harbor interface you design against (READ-ONLY reference,",
+                    "your sandbox has no harbor install) is mirrored at:",
+                    "  upstream_source/harbor_contract/   (BaseAgent, BaseEnvironment +",
+                    "  ExecResult, AgentContext, LiteLLM/Chat, TmuxSession)",
+                    "Use `environment.exec(...)` to run commands in the task container",
+                    "and a harbor LLM client to call the (fixed) solver model; see the",
+                    "reference `terminus_2.py` for concrete usage of both.",
+                    "",
+                    "We do NOT prescribe a design — no required loop shape, memory,",
+                    "retry, or multi-attempt scheme. Choose whatever mechanism the",
+                    "traces justify; a from-scratch redesign and a small edit are both",
+                    "valid candidates.",
+                    "",
+                    "Then in pending_eval.json set `extra.source_project_path` to the",
+                    "ABSOLUTE path of the package ROOT (the parent of `terminus_2/`):",
                     f"  {agent_root}",
                     "",
-                    "Do NOT touch any task's solution/ or tests/ or task.toml.",
+                    "Do NOT touch any task's solution/ or tests/ or task.toml, and",
+                    "never read solution/ or the verifier's reward files at task time.",
                     "",
                 ]
             ),
