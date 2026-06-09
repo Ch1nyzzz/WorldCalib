@@ -428,6 +428,61 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.set_defaults(autolab_verify_patches=True)
 
+    # --- Designer mode (AutoLab only): one long autonomous session ----------
+    parser.add_argument(
+        "--designer",
+        action="store_true",
+        help=(
+            "AutoLab only: run ONE long autonomous designer session (the agent "
+            "owns the rhythm, calls worldcalib-eval on demand, checkpoints "
+            "designs) instead of the per-iteration loop. --iterations is ignored."
+        ),
+    )
+    parser.add_argument(
+        "--designer-session-timeout-s",
+        type=int,
+        default=4 * 3600,
+        help="PER-ROUND inner-agent timeout for the designer goal-loop.",
+    )
+    parser.add_argument(
+        "--designer-min-directions",
+        type=int,
+        default=3,
+        help="Hard floor: the designer may not stop until it has implemented+"
+        "evaluated+checkpointed this many genuinely-different CODE-LEVEL directions.",
+    )
+    parser.add_argument(
+        "--designer-max-rounds",
+        type=int,
+        default=6,
+        help="Max continuation rounds (re-invocations) of the designer goal-loop.",
+    )
+    parser.add_argument(
+        "--designer-confirm-attempts",
+        type=int,
+        default=2,
+        help="harbor -k used for held-out checkpoint selection (noise reduction).",
+    )
+    parser.add_argument(
+        "--designer-max-eval-calls",
+        type=int,
+        default=40,
+        help="Max number of eval submissions the designer agent may make.",
+    )
+    parser.add_argument(
+        "--designer-max-task-runs",
+        type=int,
+        default=120,
+        help="Max cumulative harbor task-runs across all designer evals (the cost cap).",
+    )
+    parser.add_argument("--designer-max-wall-clock-s", type=int, default=6 * 3600)
+    parser.add_argument(
+        "--designer-smoke-task-ids",
+        default="",
+        help="CSV of train task ids for the `--subset smoke` shortcut (default: a few CPU-only train tasks).",
+    )
+    parser.add_argument("--designer-smoke-size", type=int, default=3)
+
     return parser
 
 
@@ -518,6 +573,16 @@ def main(argv: list[str] | None = None) -> int:
         fanout_k=args.fanout_k,
         fanout_orchestrator=args.fanout_orchestrator,
         bestofn_k=args.bestofn_k,
+        designer=args.designer,
+        designer_min_directions=args.designer_min_directions,
+        designer_max_rounds=args.designer_max_rounds,
+        designer_confirm_attempts=args.designer_confirm_attempts,
+        designer_session_timeout_s=args.designer_session_timeout_s,
+        designer_max_eval_calls=args.designer_max_eval_calls,
+        designer_max_task_runs=args.designer_max_task_runs,
+        designer_max_wall_clock_s=args.designer_max_wall_clock_s,
+        designer_smoke_task_ids=tuple(_csv(args.designer_smoke_task_ids)),
+        designer_smoke_size=args.designer_smoke_size,
     )
 
     if args.task == "longmemeval":
