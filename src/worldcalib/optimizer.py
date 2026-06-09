@@ -201,6 +201,36 @@ class OptimizerConfig:
     # fanout_k (K *parallel* proposer agents) by using one proposer; eval cost
     # stays at one candidate. 1 = the classic single-candidate path.
     bestofn_k: int = 1
+    # --- Designer mode (long autonomous session; AutoLab only) ---
+    # When True, run() skips the per-iteration loop and launches ONE long
+    # proposer session that owns the design rhythm: it edits the editable agent
+    # source freely, calls an eval tool (worldcalib-eval) on a train subset
+    # whenever it wants to verify, keeps a design log, and checkpoints converged
+    # designs (worldcalib-checkpoint). The harness scores every checkpoint on
+    # the held-out test split after the session and picks a winner. Eval runs
+    # host-side via a file bridge (the sandbox has no harbor). Only the AutoLab
+    # optimizer implements this; the base class raises NotImplementedError.
+    designer: bool = False
+    # Goal-loop: the model judges convergence (via done.py), but may not stop
+    # until it has implemented+evaluated+checkpointed >= designer_min_directions
+    # genuinely-different CODE-LEVEL directions. The loop re-invokes the designer
+    # (continuation) up to designer_max_rounds times until that floor is met and
+    # convergence is declared (or a safety ceiling trips). designer_session_
+    # timeout_s is the PER-ROUND inner-agent timeout.
+    designer_min_directions: int = 3
+    designer_max_rounds: int = 6
+    designer_session_timeout_s: int = 4 * 3600
+    designer_confirm_attempts: int = 2  # harbor -k for held-out selection (noise reduction)
+    # The agent freely chooses which tasks to eval; cost is capped (safety net)
+    # by the cumulative number of harbor task-runs and eval submissions, plus
+    # wall-clock — generous, so the loop stops on the goal, not the quota.
+    designer_max_eval_calls: int = 200
+    designer_max_task_runs: int = 600
+    designer_max_wall_clock_s: int = 11 * 3600
+    # The `--subset smoke` shortcut subset (a cheap default when the agent does
+    # not name tasks). Empty → a few CPU-only train tasks, smallest first.
+    designer_smoke_task_ids: tuple[str, ...] = ()
+    designer_smoke_size: int = 3
 
 
 class LocomoOptimizer:
@@ -396,6 +426,13 @@ class LocomoOptimizer:
         self._save_best_candidates(candidates)
         self._refresh_run_indexes(candidates)
 
+        # Designer mode replaces the per-iteration loop with one long
+        # self-directed session (see OptimizerConfig.designer). The iter0 seed
+        # frontier above gives it a baseline; everything after is owned by the
+        # designer agent + the host eval bridge.
+        if self.config.designer:
+            return self._run_designer_session(examples, candidates)
+
         for iteration in range(start_iteration, self.config.iterations + 1):
             previous_best_passrate = self._best_passrate(candidates)
             previous_frontier_ids = self._quality_frontier_ids(candidates)
@@ -517,6 +554,21 @@ class LocomoOptimizer:
             encoding="utf-8",
         )
         return final_summary
+
+    def _run_designer_session(
+        self,
+        examples: list[Any],
+        candidates: list[CandidateResult],
+    ) -> dict[str, Any]:
+        """Run one long autonomous designer session (see config.designer).
+
+        Only benchmarks whose eval can be exposed as a host-side tool implement
+        this; the base loop has no such bridge."""
+
+        raise NotImplementedError(
+            "designer mode is only implemented for the AutoLab optimizer "
+            "(eval is served by a host-side bridge that runs harbor)."
+        )
 
     def _run_default_proposer_iteration(
         self,
@@ -3141,6 +3193,7 @@ class LocomoOptimizer:
         cwd: Path | None = None,
         skill_text: str | None = None,
         sync_calibration_back: bool = True,
+        timeout_s: int | None = None,
     ) -> Any:
         agent = self.config.proposer_agent.strip().lower()
         proposer_cwd = cwd or self.project_root
@@ -3148,7 +3201,7 @@ class LocomoOptimizer:
             cwd=proposer_cwd,
             log_dir=log_dir,
             name=name,
-            timeout_s=self.config.propose_timeout_s,
+            timeout_s=timeout_s if timeout_s is not None else self.config.propose_timeout_s,
             sandbox=self._proposer_sandbox_config(),
             # On a docker timeout, kill the orphaned container instead of
             # leaking it; give the in-flight candidate a short grace to land.
