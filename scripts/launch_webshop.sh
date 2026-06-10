@@ -131,7 +131,7 @@ setsid python -m worldcalib.optimize_cli \
   --proposer-variant "$VARIANT" \
   "${SEED_ARG[@]}" \
   --dry-run-probe-k "${DRY_RUN_PROBE_K:-3}" \
-  --selection-policy default \
+  --selection-policy self \
   --no-summary \
   --run-id "$run_id" \
   --out "runs/${run_id}" \

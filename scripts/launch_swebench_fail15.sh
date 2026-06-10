@@ -126,7 +126,7 @@ setsid worldcalib-optimize \
   --mini-swe-agent-eval-command "$MINISWE_EVAL_CMD" \
   --proposer-variant "$PROPOSER_VARIANT" \
   --baseline-dir "$BASELINE_DIR" \
-  --selection-policy pareto \
+  --selection-policy self \
   --no-summary \
   --run-id "$run_id" \
   --out "runs/${run_id}" \
