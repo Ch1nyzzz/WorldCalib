@@ -247,6 +247,43 @@ def _add_common_optimize_args(parser: argparse.ArgumentParser) -> None:
             "crash), skip it instead of burning a full eval. 0 disables (default)."
         ),
     )
+    parser.add_argument(
+        "--fanout-k",
+        type=int,
+        default=1,
+        help=(
+            "Fan-out best-of-N (calib variant only). When > 1, each iteration "
+            "spawns this many proposer agents IN PARALLEL — each independently "
+            "designs and fully implements ONE candidate — then an independent "
+            "orchestrator selects the single winner to evaluate. 1 = classic "
+            "single-proposer path (default). Eval cost stays at one candidate."
+        ),
+    )
+    parser.add_argument(
+        "--no-fanout-orchestrator",
+        dest="fanout_orchestrator",
+        action="store_false",
+        help=(
+            "With --fanout-k>1, skip the orchestrator agent and select the "
+            "winner by a deterministic risk-adjusted rule (strongest net "
+            "lower bound) over the proposers' self-predictions. Control arm."
+        ),
+    )
+    parser.set_defaults(fanout_orchestrator=True)
+    parser.add_argument(
+        "--bestofn-k",
+        type=int,
+        default=1,
+        help=(
+            "Best-of-N single-proposer (calib variant only). When > 1, ONE "
+            "proposer designs and fully implements this many distinct "
+            "candidates in a single workspace (each under ./cand_<i>/), writes "
+            "a prediction per candidate, and an independent selector (the same "
+            "orchestrator agent, gated by --no-fanout-orchestrator) picks the "
+            "one to evaluate. Differs from --fanout-k (K parallel agents) by "
+            "using one proposer. 1 = classic single-candidate path (default)."
+        ),
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -268,6 +305,12 @@ def build_parser() -> argparse.ArgumentParser:
     target.add_argument("--tau2", dest="task", action="store_const", const="tau2")
     target.add_argument(
         "--arc-agi2", dest="task", action="store_const", const="arc_agi2"
+    )
+    target.add_argument(
+        "--swebench", dest="task", action="store_const", const="swebench"
+    )
+    target.add_argument(
+        "--autolab", dest="task", action="store_const", const="autolab"
     )
 
     _add_common_optimize_args(parser)
@@ -301,7 +344,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--agentbench-test-size", type=int, default=40)
 
     parser.add_argument(
-        "--tau2-domain", choices=("telecom", "airline", "retail"), default="telecom"
+        "--tau2-domain",
+        choices=("telecom", "airline", "retail", "banking_knowledge"),
+        default="telecom",
     )
     parser.add_argument("--tau2-agent-model", default="deepseek/deepseek-chat")
     parser.add_argument("--tau2-user-model", default="deepseek/deepseek-chat")
@@ -325,6 +370,118 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--arc-max-attempts", type=int, default=2)
     parser.add_argument("--arc-runs", type=int, default=1)
     parser.add_argument("--arc-concurrency", type=int, default=8)
+
+    parser.add_argument("--swebench-data-path", type=Path, default=None)
+    # Default None -> the swebench dispatch branch falls back to
+    # SwebenchOptimizerConfig.mini_swe_agent_source_path so we avoid a
+    # top-level import of the coding module here.
+    parser.add_argument("--mini-swe-agent-source-path", type=Path, default=None)
+    parser.add_argument("--mini-swe-agent-command", default="")
+    parser.add_argument("--mini-swe-agent-eval-command", default="")
+    parser.add_argument("--swebench-force", action="store_true")
+
+    parser.add_argument(
+        "--autolab-tasks-path",
+        type=Path,
+        default=None,
+        help="Path to the AutoLab 36-task dir (default: third_party/autolab/tasks).",
+    )
+    parser.add_argument(
+        "--autolab-terminus2-source",
+        type=Path,
+        default=None,
+        help=(
+            "Editable terminus-2 source root (parent of the terminus_2/ package) "
+            "the proposer snapshots and edits. Default: references/vendor/terminus2_agent."
+        ),
+    )
+    parser.add_argument("--autolab-harbor-python", type=Path, default=None)
+    parser.add_argument("--autolab-harbor-binary", type=Path, default=None)
+    parser.add_argument("--autolab-agent", default="terminus-2")
+    parser.add_argument("--autolab-harbor-model", default=None)
+    parser.add_argument("--autolab-n-attempts", type=int, default=1)
+    parser.add_argument("--autolab-timeout-multiplier", type=float, default=1.0)
+    parser.add_argument("--autolab-concurrency", type=int, default=4)
+    parser.add_argument("--autolab-env-file", type=Path, default=None)
+    parser.add_argument("--autolab-reward-gate", type=float, default=0.5)
+    parser.add_argument(
+        "--autolab-score-mode",
+        choices=("best", "avg"),
+        default="best",
+        help="Which of Best@k / Avg@k drives TaskResult.score (default best).",
+    )
+    parser.add_argument(
+        "--autolab-task-ids",
+        default="",
+        help="Comma-separated subset of task ids; empty = all 36.",
+    )
+    parser.add_argument("--autolab-force", action="store_true")
+    parser.add_argument(
+        "--autolab-skip-patch-check",
+        dest="autolab_verify_patches",
+        action="store_false",
+        help=(
+            "Skip the startup check that the cyh_dev harbor is patched for "
+            "GPU passthrough + long command durations. Off-by-default; only "
+            "use when running CPU-only tasks on an intentionally-unpatched venv."
+        ),
+    )
+    parser.set_defaults(autolab_verify_patches=True)
+
+    # --- Designer mode (AutoLab only): one long autonomous session ----------
+    parser.add_argument(
+        "--designer",
+        action="store_true",
+        help=(
+            "AutoLab only: run ONE long autonomous designer session (the agent "
+            "owns the rhythm, calls worldcalib-eval on demand, checkpoints "
+            "designs) instead of the per-iteration loop. --iterations is ignored."
+        ),
+    )
+    parser.add_argument(
+        "--designer-session-timeout-s",
+        type=int,
+        default=4 * 3600,
+        help="PER-ROUND inner-agent timeout for the designer goal-loop.",
+    )
+    parser.add_argument(
+        "--designer-min-directions",
+        type=int,
+        default=3,
+        help="Hard floor: the designer may not stop until it has implemented+"
+        "evaluated+checkpointed this many genuinely-different CODE-LEVEL directions.",
+    )
+    parser.add_argument(
+        "--designer-max-rounds",
+        type=int,
+        default=6,
+        help="Max continuation rounds (re-invocations) of the designer goal-loop.",
+    )
+    parser.add_argument(
+        "--designer-confirm-attempts",
+        type=int,
+        default=2,
+        help="harbor -k used for held-out checkpoint selection (noise reduction).",
+    )
+    parser.add_argument(
+        "--designer-max-eval-calls",
+        type=int,
+        default=40,
+        help="Max number of eval submissions the designer agent may make.",
+    )
+    parser.add_argument(
+        "--designer-max-task-runs",
+        type=int,
+        default=120,
+        help="Max cumulative harbor task-runs across all designer evals (the cost cap).",
+    )
+    parser.add_argument("--designer-max-wall-clock-s", type=int, default=6 * 3600)
+    parser.add_argument(
+        "--designer-smoke-task-ids",
+        default="",
+        help="CSV of train task ids for the `--subset smoke` shortcut (default: a few CPU-only train tasks).",
+    )
+    parser.add_argument("--designer-smoke-size", type=int, default=3)
 
     return parser
 
@@ -363,6 +520,14 @@ def main(argv: list[str] | None = None) -> int:
         from worldcalib.reasoning.arc_scaffolds import DEFAULT_ARC_SEED_SCAFFOLDS
 
         scaffolds_csv = list(DEFAULT_ARC_SEED_SCAFFOLDS)
+    elif args.task == "swebench":
+        from worldcalib.coding.swebench import DEFAULT_MINI_SWE_AGENT_NAME
+
+        scaffolds_csv = [DEFAULT_MINI_SWE_AGENT_NAME]
+    elif args.task == "autolab":
+        from worldcalib.autolab.autolab import DEFAULT_AUTOLAB_SCAFFOLD_NAME
+
+        scaffolds_csv = [DEFAULT_AUTOLAB_SCAFFOLD_NAME]
     else:
         scaffolds_csv = list(DEFAULT_EVOLUTION_SEED_SCAFFOLDS)
     scaffold_extra = _scaffold_extra(args.scaffold_extra_json)
@@ -405,6 +570,19 @@ def main(argv: list[str] | None = None) -> int:
         proposer_variant=args.proposer_variant,
         critic_gate_enforce=args.critic_gate_enforce,
         dry_run_probe_k=args.dry_run_probe_k,
+        fanout_k=args.fanout_k,
+        fanout_orchestrator=args.fanout_orchestrator,
+        bestofn_k=args.bestofn_k,
+        designer=args.designer,
+        designer_min_directions=args.designer_min_directions,
+        designer_max_rounds=args.designer_max_rounds,
+        designer_confirm_attempts=args.designer_confirm_attempts,
+        designer_session_timeout_s=args.designer_session_timeout_s,
+        designer_max_eval_calls=args.designer_max_eval_calls,
+        designer_max_task_runs=args.designer_max_task_runs,
+        designer_max_wall_clock_s=args.designer_max_wall_clock_s,
+        designer_smoke_task_ids=tuple(_csv(args.designer_smoke_task_ids)),
+        designer_smoke_size=args.designer_smoke_size,
     )
 
     if args.task == "longmemeval":
@@ -481,6 +659,59 @@ def main(argv: list[str] | None = None) -> int:
                 arc_concurrency=args.arc_concurrency,
             )
         )
+    elif args.task == "swebench":
+        from worldcalib.coding.swebench_optimizer import (
+            SwebenchOptimizer,
+            SwebenchOptimizerConfig,
+        )
+
+        # mini_swe_agent_source_path falls back to the config default
+        # (DEFAULT_MINI_SWE_AGENT_SOURCE_PATH) when the flag is omitted.
+        swebench_kwargs = dict(
+            **shared,
+            data_path=args.swebench_data_path,
+            mini_swe_agent_command=args.mini_swe_agent_command,
+            mini_swe_agent_eval_command=args.mini_swe_agent_eval_command,
+            force=args.swebench_force,
+        )
+        if args.mini_swe_agent_source_path is not None:
+            swebench_kwargs["mini_swe_agent_source_path"] = (
+                args.mini_swe_agent_source_path
+            )
+        optimizer = SwebenchOptimizer(SwebenchOptimizerConfig(**swebench_kwargs))
+    elif args.task == "autolab":
+        from worldcalib.autolab.autolab_optimizer import (
+            AutolabOptimizer,
+            AutolabOptimizerConfig,
+        )
+
+        # Path-typed flags fall back to AutolabOptimizerConfig defaults when
+        # omitted, so we avoid a top-level import of the autolab module here.
+        autolab_kwargs = dict(
+            **shared,
+            harbor_agent=args.autolab_agent,
+            harbor_n_attempts=args.autolab_n_attempts,
+            harbor_timeout_multiplier=args.autolab_timeout_multiplier,
+            harbor_concurrency=args.autolab_concurrency,
+            reward_gate=args.autolab_reward_gate,
+            score_mode=args.autolab_score_mode,
+            task_ids=tuple(_csv(args.autolab_task_ids)),
+            force=args.autolab_force,
+            verify_patches=args.autolab_verify_patches,
+        )
+        if args.autolab_tasks_path is not None:
+            autolab_kwargs["tasks_path"] = args.autolab_tasks_path
+        if args.autolab_terminus2_source is not None:
+            autolab_kwargs["terminus2_source_path"] = args.autolab_terminus2_source
+        if args.autolab_harbor_python is not None:
+            autolab_kwargs["harbor_python"] = args.autolab_harbor_python
+        if args.autolab_harbor_binary is not None:
+            autolab_kwargs["harbor_binary"] = args.autolab_harbor_binary
+        if args.autolab_harbor_model is not None:
+            autolab_kwargs["harbor_model"] = args.autolab_harbor_model
+        if args.autolab_env_file is not None:
+            autolab_kwargs["harbor_env_file"] = args.autolab_env_file
+        optimizer = AutolabOptimizer(AutolabOptimizerConfig(**autolab_kwargs))
     else:
         optimizer = LocomoOptimizer(LocomoOptimizerConfig(**shared))
 

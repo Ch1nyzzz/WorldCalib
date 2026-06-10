@@ -122,20 +122,20 @@ ARC_WORKSPACE_SPEC = BenchmarkWorkspaceSpec(
 
 SWEBENCH_WORKSPACE_SPEC = BenchmarkWorkspaceSpec(
     benchmark="swebench",
-    primary_source_file="swebench.py",
+    primary_source_file="coding/swebench.py",
     source_files=(
         "__init__.py",
-        "benchmark_tasks.py",
         "benchmark_workspaces.py",
         "claude_runner.py",
+        "coding/__init__.py",
+        "coding/swebench.py",
+        "coding/swebench_optimizer.py",
         "model.py",
         "optimizer.py",
         "pareto.py",
         "post_eval.py",
         "proposer_prompt.py",
         "schemas.py",
-        "swebench.py",
-        "swebench_optimizer.py",
     ),
 )
 
