@@ -458,6 +458,8 @@ def test_miniswe_runner_keeps_api_key_out_of_argv(tmp_path, monkeypatch) -> None
         api_key_env="TOGETHER_API_KEY",
         step_limit=0,
         max_tokens=128,
+        temperature=0.0,
+        reasoning_effort=None,
     )
 
     assert module.run_agent(args, root=tmp_path, instance_id="repo__issue-1") == 0
