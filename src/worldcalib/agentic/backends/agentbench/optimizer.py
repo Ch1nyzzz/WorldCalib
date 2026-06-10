@@ -110,6 +110,14 @@ class AgentBenchOptimizer(SelfDistillOptimizer):
     def _build_seed_scaffold(self, name: str) -> AgentScaffold:
         return build_agent_scaffold(name)
 
+    def _probe_rejects_on_zero_completion_tokens(self) -> bool:
+        """AgentBench rows hardcode 0 tokens (the agentrl client never surfaces
+        usage), so zero completion tokens is NOT a crash signal here — it is the
+        norm for every candidate, including the working seed. The dry-run probe
+        keeps only its raised-exception detection for this backend.
+        """
+        return False
+
     # ── naming / policy / candidate defaults ─────────────────────────────────
 
     def _benchmark_prompt_name(self) -> str:
