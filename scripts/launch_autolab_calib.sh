@@ -180,6 +180,18 @@ if [ "${AUTOLAB_SKIP_PATCH_CHECK:-0}" = "1" ]; then
   autolab_args+=(--autolab-skip-patch-check)
 fi
 
+# BASELINE_DIR: reuse a precomputed iter-0 seed eval (its candidate_results/
+# terminus2_autolab.json) so both ablation arms share the exact same baseline
+# instead of re-paying (and re-randomising) the seed eval.
+baseline_args=()
+if [ -n "${BASELINE_DIR:-}" ]; then
+  if [ ! -d "$BASELINE_DIR/candidate_results" ]; then
+    printf 'fatal: BASELINE_DIR=%q has no candidate_results/ (not an iter-0 run dir)\n' "$BASELINE_DIR" >&2
+    exit 2
+  fi
+  baseline_args=(--baseline-dir "$BASELINE_DIR")
+fi
+
 mkdir -p logs runs
 
 # RESUME_RUN_ID: continue an existing run dir (e.g. after truncate_run_to_iter.py)
@@ -221,6 +233,7 @@ printf '[%s] START %s\n[%s] LOG   %s\n' \
 
 setsid worldcalib-optimize \
   "${autolab_args[@]}" \
+  "${baseline_args[@]}" \
   --split train \
   --proposer-variant "$PROPOSER_VARIANT" \
   --selection-policy self \
