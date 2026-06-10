@@ -152,17 +152,14 @@ def _add_common_optimize_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--scaffold-extra-json", default=None)
     parser.add_argument(
         "--selection-policy",
-        default="default",
-        help="Optimizer1 selection policy (default, progressive, bandit, pareto, island, ...)",
-    )
-    parser.add_argument(
-        "--island-explore-c",
-        type=float,
-        default=0.5,
+        choices=("self", "default"),
+        default="self",
         help=(
-            "UCB1 exploration weight for the 'island' selection policy. "
-            "Higher = more exploration (under-expanded leaders + clean seed); "
-            "lower = greedier toward the current passrate champion."
+            "Patch-base policy. 'self' (default): the lex-best candidate "
+            "(passrate, then average_score) is materialised as the default "
+            "base and the PROPOSER decides what to build on, guided by "
+            "frontier_manifest.json + task_score_matrix.json. 'default': "
+            "always re-baseline from the clean seed snapshot."
         ),
     )
     parser.add_argument(
@@ -510,7 +507,6 @@ def main(argv: list[str] | None = None) -> int:
         scaffolds=tuple(scaffolds_csv),
         scaffold_extra=scaffold_extra,
         selection_policy=args.selection_policy,
-        island_explore_c=args.island_explore_c,
         baseline_dir=args.baseline_dir,
         summaries_in_workspace=not args.no_summary,
         proposer_sandbox=args.proposer_sandbox,

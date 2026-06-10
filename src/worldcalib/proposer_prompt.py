@@ -73,8 +73,7 @@ def build_progressive_proposer_prompt(
     optimization_directions: tuple[str, ...],
     split: str,
     limit: int,
-    selection_policy: str = "progressive",
-    bandit_policy: dict[str, object] | None = None,
+    selection_policy: str = "self",
     benchmark_name: str = "LOCOMO conversational-memory QA",
     current_base_iter: int | None = None,
     current_base_passrate: float | None = None,
@@ -86,10 +85,10 @@ def build_progressive_proposer_prompt(
     """Build the proposer's per-iteration user message.
 
     Returns only the iteration assignment: run/iteration metadata,
-    reference-role and bandit blocks, the available-files listing, the
-    edit scope, and the ``pending_eval.json`` schema. The proposer's
-    static contract is delivered separately as the per-benchmark skill
-    through the system-prompt channel, so it is never inlined here.
+    reference-role notes, the available-files listing, the edit scope,
+    and the ``pending_eval.json`` schema. The proposer's static contract
+    is delivered separately as the per-benchmark skill through the
+    system-prompt channel, so it is never inlined here.
     """
 
     direction_lines = "\n".join(f"- {line}" for line in optimization_directions)
@@ -112,89 +111,14 @@ overall system-level redesign:
             return str(path)
 
     refs = ", ".join(f"iter_{item:03d}" for item in reference_iterations) or "none"
-    if selection_policy == "progressive" and budget in {"low", "medium"}:
-        best_label = (
-            ", ".join(f"iter_{item:03d}" for item in reference_iterations) or "none"
-        )
+    if selection_policy == "self":
         reference_role_note = (
-            f"- Progressive reference roles: best iteration(s): `{best_label}`.\n"
+            "- Self-select reference roles: all previous raw iterations are "
+            "available, each with its full `source_snapshot/`. YOU choose the "
+            "parent to build on (see Starting Point below).\n"
         )
-    elif selection_policy == "progressive":
-        reference_role_note = (
-            "- Progressive reference roles: high budget includes all available raw "
-            "reference iterations; use summaries to rank them.\n"
-        )
-    elif selection_policy == "bandit" and bandit_policy:
-        best_iter_list = bandit_policy.get("best_iterations") or []
-        best_label = (
-            ", ".join(f"iter_{int(item):03d}" for item in best_iter_list)
-            if best_iter_list
-            else "none"
-        )
-        reference_role_note = (
-            f"- Bandit reference roles: best iteration(s): `{best_label}`.\n"
-        )
-    elif selection_policy == "random":
-        reference_role_note = (
-            "- Baseline reference policy: random sample of up to 3 previous "
-            "raw iterations; no metric ranking is implied by the selection.\n"
-        )
-    elif selection_policy == "recent":
-        reference_role_note = (
-            "- Baseline reference policy: most recent up to 3 previous raw "
-            "iterations; no metric ranking is implied by the selection.\n"
-        )
-    elif selection_policy == "best":
-        reference_role_note = (
-            "- Baseline reference policy: top-3 previous raw iterations by "
-            "train passrate.\n"
-        )
-    elif selection_policy == "curaii":
-        if budget == "low":
-            reference_role_note = (
-                "- CuraII reference roles: the single best previous iteration "
-                "(also the patch base initialised into `project_source/`).\n"
-            )
-        elif budget == "medium":
-            reference_role_note = (
-                "- CuraII reference roles: the top-3 previous iterations whose "
-                "passrate strictly beats the seed baseline; the chosen patch "
-                "base is one of them and is also initialised into "
-                "`project_source/`.\n"
-            )
-        else:
-            reference_role_note = (
-                "- CuraII reference roles: all previous raw iterations are "
-                "available for diagnosis; the chosen patch base is initialised "
-                "into `project_source/`.\n"
-            )
     else:
         reference_role_note = ""
-    bandit_section = ""
-    if selection_policy == "bandit":
-        policy = bandit_policy or {}
-
-        def listed(name: str) -> str:
-            values = policy.get(name)
-            if not isinstance(values, (list, tuple)) or not values:
-                return "none"
-            return ", ".join(f"`{item}`" for item in values[:12])
-
-        bandit_section = f"""
-## Bandit Context Policy
-
-This iteration uses online file-utility estimates to suggest where to start.
-Read `evolution_summary.jsonl` and `best_candidates.json` (when a `summaries/`
-directory is provided) whenever you need to trace cross-iteration patterns or
-identify a strong parent to build on.
-
-The hot/other lists below are advisory and reflect historical reads only;
-they do not restrict what you may read. If a file under "Other tracked files"
-fills a diagnostic gap, read it.
-
-- Hot files to inspect first: {listed("hot_files")}
-- Other tracked files (read on demand if they fill a diagnostic gap): {listed("warm_files")}
-"""
     refs_json = ", ".join(str(item) for item in reference_iterations)
     pending_eval_display = show(pending_eval_path)
     state_display = show(state_path) if state_path is not None else None
@@ -344,11 +268,43 @@ fills a diagnostic gap, read it.
             )
         else:
             base_metric_clause = ""
-        starting_point_block = (
-            f"Your patch base is `iter_{current_base_iter:03d}`"
-            f"{base_metric_clause}. `{source_snapshot_display}/candidate/project_source/` "
-            f"is already initialized to that candidate's source — edit on top of it."
-        )
+        if selection_policy == "self":
+            starting_point_block = f"""## Starting Point — YOU choose the parent
+
+The DEFAULT patch base is `iter_{current_base_iter:03d}`{base_metric_clause} —
+the lex-best candidate so far (passrate first, average_score tiebreak).
+`{source_snapshot_display}/candidate/project_source/` is already initialized to
+that candidate's source.
+
+You are NOT bound to it. Before designing, read `frontier_manifest.json` (every
+prior candidate's passrate / average_score / hypothesis / parent edge) and
+`task_score_matrix.json` (the full iter x task score matrix — judge per-task
+variance yourself from the history, do not chase one-off highs). Then decide:
+
+- KEEP the default base and edit on top of it; or
+- REPLACE it wholesale: copy `{reference_display}/iter_NNN/source_snapshot/candidate/project_source/`
+  (or the corresponding `upstream_source/` tree) over your editable source; or
+- GRAFT: combine mechanisms from several prior iterations' snapshots.
+
+Whatever you choose, declare the parent in your candidate config as
+`"base_iter": <N>` (use the default's number if you kept it; `0` for the clean
+seed) so the lineage stays honest."""
+        else:
+            starting_point_block = (
+                f"Your patch base is `iter_{current_base_iter:03d}`"
+                f"{base_metric_clause}. `{source_snapshot_display}/candidate/project_source/` "
+                f"is already initialized to that candidate's source — edit on top of it."
+            )
+    elif selection_policy == "self":
+        starting_point_block = f"""## Starting Point — YOU choose the parent
+
+No prior candidate beats the seed yet, so
+`{source_snapshot_display}/candidate/` holds the clean seed source. If prior
+iterations exist, read `frontier_manifest.json` and `task_score_matrix.json`
+and feel free to copy or graft any prior iteration's snapshot from
+`{reference_display}/iter_NNN/source_snapshot/` instead of starting clean.
+Declare the parent you actually built on in your candidate config as
+`"base_iter": <N>` (`0` for the clean seed)."""
     else:
         starting_point_block = f"""Every iteration starts from the clean source snapshot in
 `{source_snapshot_display}/candidate/`. Historical iterations are diagnostic
@@ -392,7 +348,6 @@ You are optimizing the {optimization_subject} for {benchmark_name}.
 
 {starting_point_block}
 {focus_section}
-{bandit_section}
 
 ## Available Files
 

@@ -118,29 +118,22 @@ class OptimizerConfig:
     baseline_dir: Path | None = None
     scaffolds: tuple[str, ...] = DEFAULT_EVOLUTION_SEED_SCAFFOLDS
     scaffold_extra: dict[str, dict[str, object]] | None = None
-    selection_policy: str = "default"
+    # "self" (default): the harness materialises the lex-best candidate
+    # (passrate desc, average_score desc, later iter wins ties) as the patch
+    # base, writes frontier_manifest.json + task_score_matrix.json into the
+    # workspace, and the PROPOSER decides what to actually build on — it may
+    # keep the default base, wholesale-copy any prior iter's source from
+    # reference_iterations/iter_NNN/source_snapshot/, or graft files across
+    # iters, declaring its chosen base in the candidate config. "default":
+    # always re-baseline from the clean seed snapshot (no resampling).
+    selection_policy: str = "self"
     include_optimization_direction: bool = False
     force_budget: str = ""
     progressive_target_system: str = "memgpt"
     progressive_initial_low_iterations: int = 5
     progressive_low_best_count: int = 1
     progressive_medium_best_count: int = 3
-    bandit_prior_weight: float = 0.4
-    bandit_prior_alpha: float = 2.0
-    bandit_exploration_c: float = 0.15
-    bandit_cost_lambda: float = 0.05
-    bandit_line_scale: int = 500
-    bandit_min_core_files: bool = True
-    bandit_stagnation_threshold: int = 4
-    bandit_reward_window: int = 8
-    bandit_reward_sigma_floor: float = 0.02
-    bandit_reward_clip: float = 2.0
-    bandit_failed_iter_penalty: float = 0.5
     pareto_quality_threshold: float = 0.125
-    # UCB1 exploration weight for the ``island`` selection policy. Larger
-    # values pull the patch base toward under-expanded leaders (and the
-    # immortal clean seed) instead of the current passrate champion.
-    island_explore_c: float = 0.5
     proposer_sandbox: str = "none"
     proposer_docker_image: str = ""
     proposer_docker_workspace: str = "/workspace"
@@ -219,8 +212,6 @@ class LocomoOptimizer:
         self.frontier_path = self.run_dir / "best_candidates.json"
         self.summary_path = self.run_dir / "evolution_summary.jsonl"
         self.generated_dir = self.run_dir / "generated"
-        self.progressive_state_path = self.run_dir / "progressive_state.json"
-        self.bandit_state_path = self.run_dir / "bandit_state.json"
         self.candidate_score_table_path = self.run_dir / "candidate_score_table.json"
         self.retrieval_diagnostics_summary_path = (
             self.run_dir / "retrieval_diagnostics_summary.json"
@@ -258,25 +249,9 @@ class LocomoOptimizer:
 
     def _validate_proposer_sandbox_policy(self) -> None:
         policy = self.config.selection_policy.strip().lower()
-        if policy not in {
-            "progressive",
-            "bandit",
-            "random",
-            "recent",
-            "best",
-            "curai",
-            "curaii",
-            "pareto",
-        }:
-            return
-        sandbox = self.config.proposer_sandbox.strip().lower()
-        if sandbox != "docker":
+        if policy not in {"self", "default"}:
             raise ValueError(
-                f"{policy} selection policy requires --proposer-sandbox docker"
-            )
-        if not self._effective_proposer_docker_image():
-            raise ValueError(
-                f"{policy} selection policy requires --proposer-docker-image"
+                f"unknown selection_policy={policy!r} (expected 'self' or 'default')"
             )
 
     def run(self) -> dict[str, Any]:
@@ -365,18 +340,6 @@ class LocomoOptimizer:
             # are about to (re)run — these may exist as crashed/partial dirs
             # plus dangling evolution_summary / diff_summary rows.
             self._clean_stale_iteration_artifacts(start_iteration)
-            if self.config.selection_policy in {
-                "progressive",
-                "curai",
-                "curaii",
-                "pareto",
-            }:
-                # Crashed iterations still bumped stagnation_count etc.;
-                # rebuild progressive_state.json from the surviving rows so
-                # the budget heuristics see the true streak.
-                self._rederive_progressive_state(
-                    candidates, start_iteration=start_iteration
-                )
 
         if candidates and not skip_iter0_recording:
             best_ids = self._quality_frontier_ids(candidates)
@@ -407,48 +370,14 @@ class LocomoOptimizer:
             return self._run_designer_session(examples, candidates)
 
         for iteration in range(start_iteration, self.config.iterations + 1):
-            previous_best_passrate = self._best_passrate(candidates)
-            previous_frontier_ids = self._quality_frontier_ids(candidates)
-            previous_best_quality = self._best_quality_value(candidates)
-            bandit_policy: dict[str, Any] | None = None
-            forced_budget = self.config.force_budget or None
-            if self.config.selection_policy == "bandit":
-                bandit_policy = self._bandit_policy_for_workspace(
-                    iteration=iteration,
-                    candidates=candidates,
-                    force_budget=forced_budget,
-                )
-                budget = str(bandit_policy.get("budget") or "low")
-            elif self.config.selection_policy in {"progressive", "curai", "curaii"}:
-                budget = forced_budget or self._progressive_budget_for_iteration(iteration)
-            elif self.config.selection_policy in {"random", "recent", "best"}:
-                budget = forced_budget or "medium"
-            else:
-                # default, pareto and island all pin to fixed-high context
-                # every iter; the only difference is the patch base. pareto
-                # resamples from the Pareto frontier and island walks an
-                # evolution tree with UCB, whereas default always
-                # re-baselines from the clean snapshot.
-                budget = forced_budget or "high"
+            budget = self.config.force_budget or "high"
             evaluated = self._run_progressive_proposer_iteration(
                 iteration,
                 candidates,
                 examples,
                 budget=budget,
-                adaptive=self.config.selection_policy
-                in {
-                    "progressive",
-                    "bandit",
-                    "random",
-                    "recent",
-                    "best",
-                    "curai",
-                    "curaii",
-                    "pareto",
-                    "island",
-                },
+                adaptive=self.config.selection_policy == "self",
                 selection_policy=self.config.selection_policy,
-                bandit_policy=bandit_policy,
             )
             candidates.extend(evaluated)
             self._save_best_candidates(candidates)
@@ -467,40 +396,6 @@ class LocomoOptimizer:
             )
             self.run_store.record_eval(iteration, evaluated)
             self._refresh_run_store(iteration)
-            if self.config.selection_policy in {"progressive", "curai", "curaii", "pareto"}:
-                # pareto's advance signal is "passrate strictly beat the
-                # historical best"; curai / curaii / progressive treat
-                # joining the top-K frontier as advance. Both routes
-                # update progressive_state.json so the budget heuristics
-                # read the stagnation_count uniformly.
-                advance_signal_ids = (
-                    None
-                    if self.config.selection_policy == "pareto"
-                    else previous_frontier_ids
-                )
-                advanced = self._update_progressive_state(
-                    iteration=iteration,
-                    budget=budget,
-                    previous_best_passrate=previous_best_passrate,
-                    previous_frontier_ids=advance_signal_ids,
-                    candidates=candidates,
-                    evaluated=evaluated,
-                )
-                # Mirror into iteration_meta so MCP queries see a single
-                # source of truth for "did this iter advance".
-                if self.trace_harness.indexer.db_path.exists():
-                    self.trace_harness.indexer.upsert_iteration_meta(
-                        iteration=iteration,
-                        advanced_frontier=advanced,
-                    )
-            if self.config.selection_policy == "bandit":
-                self._update_bandit_state(
-                    iteration=iteration,
-                    previous_best_passrate=previous_best_passrate,
-                    previous_best_quality=previous_best_quality,
-                    evaluated=evaluated,
-                    call_dir=self._iteration_dir(iteration),
-                )
 
         test_frontier_summary = (
             self._run_test_frontier(candidates)
@@ -519,9 +414,6 @@ class LocomoOptimizer:
         }
         if test_frontier_summary is not None:
             final_summary["test_frontier"] = test_frontier_summary
-        if self.config.selection_policy == "bandit":
-            final_summary["bandit_state_path"] = str(self.bandit_state_path)
-            final_summary["bandit_policy"] = self._load_bandit_state().get("last_policy", {})
         (self.run_dir / "optimizer_summary.json").write_text(
             json.dumps(final_summary, indent=2, ensure_ascii=False),
             encoding="utf-8",
@@ -566,7 +458,6 @@ class LocomoOptimizer:
         budget: str,
         adaptive: bool,
         selection_policy: str | None = None,
-        bandit_policy: dict[str, Any] | None = None,
     ) -> list[CandidateResult]:
         if self.pending_eval_path.exists():
             self.pending_eval_path.unlink()
@@ -577,46 +468,31 @@ class LocomoOptimizer:
         workspace_dir = call_dir / "workspace"
         workspace_generated_dir = workspace_dir / "generated"
         reference_iterations: tuple[int, ...] = ()
-        policy_name = selection_policy or ("progressive" if adaptive else "default")
-        curaii_base_iter: int | None = None
-        curaii_base_passrate: float | None = None
-        curaii_base_average_score: float | None = None
-        curaii_refs_override: tuple[int, ...] | None = None
-        if policy_name == "curaii":
-            curaii_base_iter, curaii_refs_override = self._curaii_select_for_budget(
+        policy_name = selection_policy or ("self" if adaptive else "default")
+        selected_base_iter: int | None = None
+        selected_base_passrate: float | None = None
+        selected_base_average_score: float | None = None
+        selected_refs_override: tuple[int, ...] | None = None
+        if policy_name == "self":
+            selected_base_iter = self._self_select_default_base(
                 existing_candidates,
                 iteration=iteration,
-                budget=budget,
-                baseline_passrate=self._seed_passrate(existing_candidates),
             )
-        elif policy_name == "pareto":
-            curaii_base_iter = self._pareto_select_base(
-                existing_candidates,
-                iteration=iteration,
-                baseline_passrate=self._seed_passrate(existing_candidates),
-            )
-            curaii_refs_override = None
-        elif policy_name == "island":
-            curaii_base_iter = self._island_select_base(
-                existing_candidates,
-                iteration=iteration,
-                baseline_passrate=self._seed_passrate(existing_candidates),
-            )
-            curaii_refs_override = None
-        if curaii_base_iter is not None:
+            selected_refs_override = None
+        if selected_base_iter is not None:
             base_candidate = next(
                 (
                     item
                     for item in existing_candidates
                     if _candidate_iteration(item.candidate_id)
-                    == curaii_base_iter
+                    == selected_base_iter
                 ),
                 None,
             )
             if base_candidate is not None:
-                curaii_base_passrate = base_candidate.passrate
-                curaii_base_average_score = base_candidate.average_score
-        state_base_iter = curaii_base_iter
+                selected_base_passrate = base_candidate.passrate
+                selected_base_average_score = base_candidate.average_score
+        state_base_iter = selected_base_iter
         if self.config.organized and state_base_iter is None:
             state_base_iter = self._state_snapshot_base_iteration(
                 existing_candidates,
@@ -625,7 +501,7 @@ class LocomoOptimizer:
         self.run_store.begin_iteration(
             iteration,
             as_of_iteration=max(0, iteration - 1),
-            base_iteration=state_base_iter if self.config.organized else curaii_base_iter,
+            base_iteration=state_base_iter if self.config.organized else selected_base_iter,
             status="running",
         )
         if self.config.organized and self.config.organized_state_md:
@@ -635,20 +511,14 @@ class LocomoOptimizer:
                 base_iteration=state_base_iter,
             )
         for attempt in range(1, max_attempts + 1):
-            if bandit_policy:
-                refs_override: tuple[int, ...] | None = tuple(
-                    int(item) for item in bandit_policy.get("reference_iterations", ())
-                )
-            else:
-                refs_override = curaii_refs_override
+            refs_override = selected_refs_override
             workspace_dir, reference_iterations = self._build_progressive_workspace(
                 iteration=iteration,
                 budget=budget,
                 existing_candidates=existing_candidates,
                 call_dir=call_dir,
                 reference_iterations_override=refs_override,
-                bandit_policy=bandit_policy,
-                base_iter=curaii_base_iter,
+                base_iter=selected_base_iter,
             )
             workspace_generated_dir = workspace_dir / "generated"
             workspace_source_snapshot_dir = workspace_dir / "source_snapshot"
@@ -679,11 +549,10 @@ class LocomoOptimizer:
                 split=self.config.split,
                 limit=self.config.limit,
                 selection_policy=policy_name,
-                bandit_policy=bandit_policy,
                 benchmark_name=self._benchmark_prompt_name(),
-                current_base_iter=curaii_base_iter,
-                current_base_passrate=curaii_base_passrate,
-                current_base_average_score=curaii_base_average_score,
+                current_base_iter=selected_base_iter,
+                current_base_passrate=selected_base_passrate,
+                current_base_average_score=selected_base_average_score,
                 state_path=(
                     workspace_dir / "state.md"
                     if self.config.organized and self.config.organized_state_md
@@ -715,11 +584,6 @@ class LocomoOptimizer:
                     "call_dir": str(call_dir),
                     "workspace_dir": str(workspace_dir),
                     "attempt": attempt,
-                    "bandit_policy_score_snapshot": (
-                        bandit_policy.get("policy_score_snapshot", {})
-                        if bandit_policy
-                        else {}
-                    ),
                 },
             )
             access_violations = self._proposer_access_violations(
@@ -802,11 +666,6 @@ class LocomoOptimizer:
                     "call_dir": str(call_dir),
                     "workspace_dir": str(workspace_dir),
                     "attempt": "missing_pending_retry",
-                    "bandit_policy_score_snapshot": (
-                        bandit_policy.get("policy_score_snapshot", {})
-                        if bandit_policy
-                        else {}
-                    ),
                 },
             )
             access_violations = self._proposer_access_violations(
@@ -906,11 +765,6 @@ class LocomoOptimizer:
                     "call_dir": str(call_dir),
                     "workspace_dir": str(workspace_dir),
                     "attempt": "invalid_pending_retry",
-                    "bandit_policy_score_snapshot": (
-                        bandit_policy.get("policy_score_snapshot", {})
-                        if bandit_policy
-                        else {}
-                    ),
                 },
             )
             access_violations = self._proposer_access_violations(
@@ -1020,7 +874,7 @@ class LocomoOptimizer:
         self.trace_harness.record_iteration(
             iteration=iteration,
             candidates=evaluated,
-            patch_base=curaii_base_iter,
+            patch_base=selected_base_iter,
             budget=budget,
             selection_policy=policy_name,
             proposer_call_dir=str(call_dir),
@@ -1043,7 +897,6 @@ class LocomoOptimizer:
         existing_candidates: list[CandidateResult],
         call_dir: Path,
         reference_iterations_override: tuple[int, ...] | None = None,
-        bandit_policy: dict[str, Any] | None = None,
         base_iter: int | None = None,
     ) -> tuple[Path, tuple[int, ...]]:
         call_dir.mkdir(parents=True, exist_ok=True)
@@ -1057,9 +910,7 @@ class LocomoOptimizer:
         self._ensure_package_dirs(workspace_generated_dir, root=workspace_generated_dir)
 
         if reference_iterations_override is not None:
-            # Caller-supplied refs are authoritative — used by bandit and by
-            # curaii when the policy explicitly wants the chosen base to
-            # appear as a reference (low/medium budgets).
+            # Caller-supplied refs are authoritative.
             reference_iterations = reference_iterations_override
         else:
             reference_iterations = self._reference_iterations_for_budget(
@@ -1085,8 +936,6 @@ class LocomoOptimizer:
             "pending_eval_path": str(workspace_dir / "pending_eval.json"),
             "base_iter": base_iter,
         }
-        if bandit_policy:
-            assignment["bandit_policy"] = bandit_policy
         for dest in (call_dir / "assignment.json", workspace_dir / "assignment.json"):
             dest.write_text(json.dumps(assignment, indent=2, ensure_ascii=False), encoding="utf-8")
 
@@ -1111,12 +960,19 @@ class LocomoOptimizer:
             call_dir=call_dir,
             assignment=assignment,
         )
+        if self.config.selection_policy == "self":
+            self._write_self_select_manifest(
+                workspace_dir,
+                existing_candidates,
+                iteration=iteration,
+                default_base_iter=base_iter,
+                reference_iterations=tuple(reference_iterations),
+            )
         self._write_access_policy(
             workspace_dir,
             source_snapshot_dir=workspace_dir / "source_snapshot",
             generated_dir=workspace_generated_dir,
             pending_eval_path=workspace_dir / "pending_eval.json",
-            bandit_policy=bandit_policy,
         )
         self._copy_workspace_state(workspace_dir / "state.md")
         self._write_runtime_config(workspace_dir)
@@ -1793,7 +1649,6 @@ class LocomoOptimizer:
         source_snapshot_dir: Path,
         generated_dir: Path,
         pending_eval_path: Path,
-        bandit_policy: dict[str, Any] | None = None,
     ) -> None:
         policy = {
             "read_roots": [str(workspace_dir)],
@@ -1816,17 +1671,6 @@ class LocomoOptimizer:
                 ),
             ],
         }
-        if bandit_policy:
-            policy.update(
-                {
-                    "hot_paths": list(bandit_policy.get("hot_files", ())),
-                    "warm_paths": list(bandit_policy.get("warm_files", ())),
-                    "cold_paths": list(bandit_policy.get("cold_files", ())),
-                    "read_budget_lines_by_path": dict(
-                        bandit_policy.get("read_budget_lines_by_path", {})
-                    ),
-                }
-            )
         for dest in (
             workspace_dir / "access_policy.json",
             workspace_dir.parent / "access_policy.json",
@@ -2867,665 +2711,11 @@ class LocomoOptimizer:
                 ("\n".join(kept) + "\n") if kept else "", encoding="utf-8"
             )
 
-    def _rederive_progressive_state(
-        self, candidates: list[CandidateResult], *, start_iteration: int
-    ) -> None:
-        """Rebuild ``progressive_state.json`` from the surviving candidates so
-        ``--resume`` is not penalised by crashed iterations that bumped
-        ``stagnation_count`` / cycled the budget without producing a row.
-
-        Mirrors ``_update_progressive_state``'s pareto-style advance rule
-        (best passrate must strictly increase) replayed over the stored
-        iterations in order."""
-
-        best_per_iter: dict[int, CandidateResult] = {}
-        for candidate in candidates:
-            iteration = _candidate_iteration(candidate.candidate_id)
-            if iteration is None or iteration < 1:
-                continue
-            current = best_per_iter.get(iteration)
-            if current is None or _candidate_score(candidate) > _candidate_score(current):
-                best_per_iter[iteration] = candidate
-
-        running_best_passrate = self._seed_passrate(candidates)
-        last_improved = 0
-        for iteration in sorted(best_per_iter):
-            if best_per_iter[iteration].passrate > running_best_passrate:
-                running_best_passrate = best_per_iter[iteration].passrate
-                last_improved = iteration
-        stagnation = max(0, (start_iteration - 1) - last_improved)
-
-        overall_best = max(candidates, key=_candidate_score) if candidates else None
-        frontier_ids = self._quality_frontier_ids(candidates)
-        prior = self._load_progressive_state()
-        budget = str(prior.get("current_budget") or "high")
-        state = {
-            "current_budget": budget,
-            "next_budget": str(prior.get("next_budget") or budget),
-            "stagnation_count": stagnation,
-            "best_passrate": overall_best.passrate if overall_best is not None else 0.0,
-            "best_average_score": (
-                overall_best.average_score if overall_best is not None else 0.0
-            ),
-            "best_candidate_id": (
-                overall_best.candidate_id if overall_best is not None else None
-            ),
-            "frontier_candidate_ids": sorted(frontier_ids),
-            "last_improved_iteration": last_improved,
-        }
-        self.progressive_state_path.write_text(
-            json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8"
-        )
-
     def _iteration_dir(self, iteration: int) -> Path:
         return self.run_dir / "proposer_calls" / f"iter_{iteration:03d}"
 
     def _workspace_dir(self, iteration: int) -> Path:
         return self._iteration_dir(iteration) / "workspace"
-
-    def _progressive_budget_for_iteration(self, iteration: int) -> str:
-        if iteration <= self.config.progressive_initial_low_iterations:
-            return "low"
-        state = self._load_progressive_state()
-        budget = str(state.get("next_budget") or state.get("current_budget") or "low")
-        if budget not in {"low", "medium", "high"}:
-            return "low"
-        return budget
-
-    def _load_progressive_state(self) -> dict[str, Any]:
-        if not self.progressive_state_path.exists():
-            return {
-                "current_budget": "low",
-                "next_budget": "low",
-                "stagnation_count": 0,
-                "best_passrate": 0.0,
-                "best_candidate_id": None,
-                "last_improved_iteration": 0,
-            }
-        try:
-            payload = json.loads(self.progressive_state_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return {}
-        return payload if isinstance(payload, dict) else {}
-
-    def _update_progressive_state(
-        self,
-        *,
-        iteration: int,
-        budget: str,
-        previous_best_passrate: float,
-        previous_frontier_ids: set[str] | None = None,
-        candidates: list[CandidateResult],
-        evaluated: list[CandidateResult],
-    ) -> bool:
-        """Update ``progressive_state.json`` and return whether the
-        iteration advanced (``improved=True`` resets stagnation_count;
-        else stagnation_count increments).
-
-        Advance signal:
-        - ``previous_frontier_ids`` provided → frontier-id diff
-          (curai / curaii / progressive use this — joining top-K
-          frontier counts as advance).
-        - ``previous_frontier_ids`` is ``None`` → strict passrate gate
-          (pareto uses this — best passrate must strictly increase).
-        """
-
-        best = max(candidates, key=_candidate_score) if candidates else None
-        best_passrate = best.passrate if best is not None else 0.0
-        frontier_ids = self._quality_frontier_ids(candidates)
-        if previous_frontier_ids is None:
-            improved = bool(evaluated and best_passrate > previous_best_passrate)
-        else:
-            evaluated_ids = {item.candidate_id for item in evaluated}
-            improved = bool(evaluated_ids & (frontier_ids - previous_frontier_ids))
-        prior = self._load_progressive_state()
-        stagnation = 0 if improved else int(prior.get("stagnation_count") or 0) + 1
-        if iteration < self.config.progressive_initial_low_iterations:
-            next_budget = "low"
-        elif improved:
-            next_budget = "low"
-        elif budget == "low":
-            next_budget = "medium"
-        elif budget == "medium":
-            next_budget = "high"
-        else:
-            next_budget = "high"
-        state = {
-            "current_budget": budget,
-            "next_budget": next_budget,
-            "stagnation_count": stagnation,
-            "best_passrate": best_passrate,
-            "best_average_score": best.average_score if best is not None else 0.0,
-            "best_candidate_id": best.candidate_id if best is not None else None,
-            "frontier_candidate_ids": sorted(frontier_ids),
-            "last_improved_iteration": (
-                iteration if improved else int(prior.get("last_improved_iteration") or 0)
-            ),
-        }
-        self.progressive_state_path.write_text(
-            json.dumps(state, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
-        return improved
-
-    def _load_bandit_state(self) -> dict[str, Any]:
-        if not self.bandit_state_path.exists():
-            return {
-                "total_iters": 0,
-                "success_iters": 0,
-                "global_reward_sum": 0.0,
-                "files": {},
-                "last_policy": {},
-            }
-        try:
-            payload = json.loads(self.bandit_state_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return {
-                "total_iters": 0,
-                "success_iters": 0,
-                "global_reward_sum": 0.0,
-                "files": {},
-                "last_policy": {},
-            }
-        return payload if isinstance(payload, dict) else {}
-
-    def _bandit_policy_for_workspace(
-        self,
-        *,
-        iteration: int,
-        candidates: list[CandidateResult],
-        force_budget: str | None = None,
-    ) -> dict[str, Any]:
-        state = self._load_bandit_state()
-        files = state.get("files") if isinstance(state.get("files"), dict) else {}
-        required = self._bandit_required_paths_set()
-        scored = sorted(
-            (
-                (str(path), float(info.get("policy_score")))
-                for path, info in files.items()
-                if isinstance(info, dict)
-                and info.get("policy_score") is not None
-                and str(path) not in required
-            ),
-            key=lambda item: (-item[1], item[0]),
-        )
-        core_files = self._bandit_core_files()
-        hot = _dedupe_list(core_files + [path for path, _ in scored[:8]])
-        warm = _dedupe_list([path for path, _ in scored[8:20]])
-
-        last_improvement = self._bandit_last_improvement_iteration(candidates) or 0
-        stagnation = max(0, iteration - last_improvement - 1)
-        stagnated = stagnation >= self.config.bandit_stagnation_threshold
-
-        if force_budget == "low":
-            budget = "low"
-            reference_iterations: tuple[int, ...] = self._bandit_reference_iterations(
-                iteration=iteration,
-                candidates=candidates,
-                state=state,
-                budget=budget,
-            )
-        elif force_budget == "medium":
-            budget = "medium"
-            reference_iterations = self._bandit_reference_iterations(
-                iteration=iteration,
-                candidates=candidates,
-                state=state,
-                budget=budget,
-            )
-        elif force_budget == "high":
-            budget = "high"
-            reference_iterations = self._bandit_reference_iterations(
-                iteration=iteration,
-                candidates=candidates,
-                state=state,
-                budget=budget,
-            )
-        elif iteration <= 1 or not files:
-            budget = "low"
-            reference_iterations = ()
-        elif stagnated:
-            budget = "high"
-            reference_iterations = self._bandit_reference_iterations(
-                iteration=iteration,
-                candidates=candidates,
-                state=state,
-                budget=budget,
-            )
-        else:
-            budget = "medium"
-            reference_iterations = self._bandit_reference_iterations(
-                iteration=iteration,
-                candidates=candidates,
-                state=state,
-                budget=budget,
-            )
-
-        best_iter_count = 1 if budget == "low" else 3
-        best_iters = [
-            it for it in self._best_iterations(candidates, k=best_iter_count)
-            if it in set(reference_iterations)
-        ]
-        read_budget = {
-            path: (800 if path in hot else 300)
-            for path in _dedupe_list(hot + warm)
-        }
-        policy = {
-            "budget": budget,
-            "reference_iterations": list(reference_iterations),
-            "hot_files": hot,
-            "warm_files": warm,
-            "cold_files": [],
-            "best_iterations": best_iters,
-            "read_budget_lines_by_path": read_budget,
-            "policy_score_snapshot": {path: score for path, score in scored[:20]},
-        }
-        state["last_policy"] = policy
-        self.bandit_state_path.parent.mkdir(parents=True, exist_ok=True)
-        self.bandit_state_path.write_text(
-            json.dumps(state, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
-        return policy
-
-    def _bandit_required_paths_set(self) -> set[str]:
-        required: set[str] = set(self._bandit_core_files())
-        # Cumulative summaries the proposer should consult freely; sizing handles
-        # whether re-reading is worthwhile, not the bandit ranking.
-        for rel in (
-            "summaries/evolution_summary.jsonl",
-            "summaries/best_candidates.json",
-            "summaries/iteration_index.json",
-            "pending_eval.json",
-        ):
-            required.add(rel)
-        return required
-
-    def _bandit_reference_iterations(
-        self,
-        *,
-        iteration: int,
-        candidates: list[CandidateResult],
-        state: dict[str, Any],
-        budget: str,
-    ) -> tuple[int, ...]:
-        # bandit v4: align ref-iter selection with progressive's best-k structure,
-        # then prepend hot_iters reverse-resolved from the previous iteration's
-        # hot/warm file paths. cap=3 for low, cap=5 for medium; high keeps the
-        # full-history behaviour.
-        available = {
-            item
-            for item in self._candidate_iterations(candidates)
-            if 0 < item < iteration and self._iteration_dir(item).exists()
-        }
-        if budget == "high":
-            return tuple(sorted(available))
-
-        last_policy = (
-            state.get("last_policy")
-            if isinstance(state.get("last_policy"), dict)
-            else {}
-        ) or {}
-        hot_iters = self._iters_from_policy_paths(
-            list(last_policy.get("hot_files") or [])
-            + list(last_policy.get("warm_files") or [])
-        )
-
-        base: list[int] = []
-        base.extend(self._best_iterations(candidates, k=1 if budget == "low" else 3))
-
-        cap = 3 if budget == "low" else 5
-        out: list[int] = []
-        seen: set[int] = set()
-        for item in list(hot_iters) + base:
-            if item in available and item not in seen:
-                out.append(item)
-                seen.add(item)
-            if len(out) >= cap:
-                break
-        return tuple(out)
-
-    def _recent_reference_iterations(self, available: set[int]) -> tuple[int, ...]:
-        return tuple(sorted(available)[-3:])
-
-    def _random_reference_iterations(
-        self,
-        available: set[int],
-        *,
-        iteration: int,
-    ) -> tuple[int, ...]:
-        ordered = sorted(available)
-        if len(ordered) <= 3:
-            return tuple(ordered)
-        seed_material = f"{self.config.run_id}:{iteration}:random".encode("utf-8")
-        seed = int.from_bytes(hashlib.sha256(seed_material).digest()[:8], "big")
-        return tuple(sorted(random.Random(seed).sample(ordered, k=3)))
-
-    def _best_reference_iterations(
-        self,
-        available: set[int],
-        candidates: list[CandidateResult],
-    ) -> tuple[int, ...]:
-        out: list[int] = []
-        seen: set[int] = set()
-        for candidate in sorted(candidates, key=_candidate_best_rank):
-            iteration = _candidate_iteration(candidate.candidate_id)
-            if iteration is None or iteration not in available or iteration in seen:
-                continue
-            seen.add(iteration)
-            out.append(iteration)
-            if len(out) >= 3:
-                break
-        return tuple(sorted(out))
-
-    def _update_bandit_state(
-        self,
-        *,
-        iteration: int,
-        previous_best_passrate: float,
-        previous_best_quality: float | None = None,
-        evaluated: list[CandidateResult],
-        call_dir: Path,
-    ) -> None:
-        state = self._load_bandit_state()
-        files = state.setdefault("files", {})
-        if not isinstance(files, dict):
-            files = {}
-            state["files"] = files
-
-        tool_access = self._load_json_file(call_dir / "agent" / "tool_access.json")
-        if not isinstance(tool_access, dict):
-            tool_access = self._latest_proposer_tool_access(iteration)
-        read_paths = self._bandit_read_paths(tool_access)
-        written_paths = self._bandit_written_paths(tool_access)
-        changed_paths = sorted({
-            self._bandit_normalize_access_path(path)
-            for path in self._changed_paths_from_diff(call_dir / "diff.patch")
-        })
-        best_eval_passrate = max((item.passrate for item in evaluated), default=0.0)
-        previous_quality = previous_best_passrate
-        reward_value = best_eval_passrate
-        history = list(state.get("passrate_history") or [])
-        prev_quality = [float(p) for p in history if p is not None]
-        recent_quality = prev_quality[-self.config.bandit_reward_window :]
-        clip = self.config.bandit_reward_clip
-        if not evaluated:
-            reward = -clip * 0.25
-        elif len(recent_quality) < 2:
-            # Pre-window iterations: use scaled improvement vs prior best as a
-            # rough surrogate, then transition to z-score once history fills.
-            raw = reward_value - previous_quality
-            reward = max(-clip, min(clip, raw * 10.0))
-        else:
-            mu = sum(recent_quality) / len(recent_quality)
-            var = sum((p - mu) ** 2 for p in recent_quality) / len(recent_quality)
-            sigma = max(self.config.bandit_reward_sigma_floor, var**0.5)
-            reward = max(-clip, min(clip, (reward_value - mu) / sigma))
-        success = reward > 0.0
-
-        history.append(reward_value if evaluated else None)
-        state.pop("quality_history", None)
-        state["passrate_history"] = history
-        state["total_iters"] = int(state.get("total_iters") or 0) + 1
-        if success:
-            state["success_iters"] = int(state.get("success_iters") or 0) + 1
-        state["global_reward_sum"] = float(state.get("global_reward_sum") or 0.0) + reward
-
-        for path, stats in read_paths.items():
-            row = files.setdefault(path, self._empty_bandit_file_state())
-            row["read_iters"] = int(row.get("read_iters") or 0) + 1
-            row["read_calls"] = int(row.get("read_calls") or 0) + int(stats.get("reads") or 0)
-            row["read_lines"] = int(row.get("read_lines") or 0) + int(stats.get("lines") or 0)
-            row["reward_sum"] = float(row.get("reward_sum") or 0.0) + reward
-            if success:
-                row["success_iters"] = int(row.get("success_iters") or 0) + 1
-        for path in written_paths:
-            row = files.setdefault(path, self._empty_bandit_file_state())
-            row["write_iters"] = int(row.get("write_iters") or 0) + 1
-        for path in changed_paths:
-            row = files.setdefault(path, self._empty_bandit_file_state())
-            row["changed_iters"] = int(row.get("changed_iters") or 0) + 1
-
-        self._recompute_bandit_scores(state)
-        self.bandit_state_path.write_text(
-            json.dumps(state, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
-
-    def _recompute_bandit_scores(self, state: dict[str, Any]) -> None:
-        files = state.get("files") if isinstance(state.get("files"), dict) else {}
-        required = self._bandit_required_paths_set()
-        total_iters = max(1, int(state.get("total_iters") or 0))
-
-        # Global stats are computed only from "scored" reads — reads of files
-        # that the bandit actually ranks. Required (always-include) files and
-        # phantom entries (reads=0, only seen via diff/write) are excluded so
-        # the prior on per-file utility reflects the discretionary read pool.
-        scored_read_iters = 0
-        scored_success_iters = 0
-        scored_reward_sum = 0.0
-        for path, info in files.items():
-            if not isinstance(info, dict):
-                continue
-            read_iters = int(info.get("read_iters") or 0)
-            if read_iters == 0 or path in required:
-                continue
-            scored_read_iters += read_iters
-            scored_success_iters += int(info.get("success_iters") or 0)
-            scored_reward_sum += float(info.get("reward_sum") or 0.0)
-
-        p_global = (
-            scored_success_iters / scored_read_iters if scored_read_iters > 0 else 0.0
-        )
-        mean_reward_global = (
-            scored_reward_sum / scored_read_iters if scored_read_iters > 0 else 0.0
-        )
-        alpha = self.config.bandit_prior_alpha
-        for path, info in files.items():
-            if not isinstance(info, dict):
-                continue
-            read_iters = int(info.get("read_iters") or 0)
-            if read_iters == 0 or path in required:
-                # Required files are always included via _bandit_core_files();
-                # phantom entries (changed/written but never read) carry no
-                # signal worth ranking against discretionary reads.
-                info["utility"] = 0.0
-                info["policy_score"] = None
-                info.setdefault("cooldown_until", 0)
-                continue
-            p_file = (
-                float(info.get("success_iters") or 0) + alpha * p_global
-            ) / (read_iters + alpha)
-            mean_reward = (
-                float(info.get("reward_sum") or 0.0)
-                + alpha * self.config.bandit_prior_weight * mean_reward_global
-            ) / (read_iters + alpha)
-            avg_lines = float(info.get("read_lines") or 0) / max(1, read_iters)
-            cost = self.config.bandit_cost_lambda * math.log1p(
-                avg_lines / max(1, self.config.bandit_line_scale)
-            )
-            bonus = self.config.bandit_exploration_c * math.sqrt(
-                math.log(total_iters + 1) / (read_iters + 1)
-            )
-            binary_utility = p_file - p_global
-            reward_utility = mean_reward - mean_reward_global
-            score = 0.7 * binary_utility + 0.3 * reward_utility - cost + bonus
-            info["utility"] = 0.7 * binary_utility + 0.3 * reward_utility
-            info["policy_score"] = score
-            info.setdefault("cooldown_until", 0)
-
-    def _empty_bandit_file_state(self) -> dict[str, Any]:
-        return {
-            "read_iters": 0,
-            "success_iters": 0,
-            "reward_sum": 0.0,
-            "read_calls": 0,
-            "read_lines": 0,
-            "write_iters": 0,
-            "changed_iters": 0,
-            "utility": 0.0,
-            "policy_score": 0.0,
-            "cooldown_until": 0,
-        }
-
-    def _bandit_core_files(self) -> list[str]:
-        if not self.config.bandit_min_core_files:
-            return []
-        source_files = set(self.workspace_spec.source_files)
-        target_files = [self.workspace_spec.primary_source_file]
-        scaffold_path = self._source_scaffold_path(self.config.progressive_target_system)
-        if scaffold_path is not None:
-            rel = f"scaffolds/{scaffold_path.name}"
-            if rel in source_files:
-                target_files.append(rel)
-        target_files.extend(
-            rel
-            for rel in ("scaffolds/base.py", "model.py", "schemas.py")
-            if rel in source_files
-        )
-        project_paths = [
-            f"source_snapshot/candidate/project_source/src/worldcalib/{rel}"
-            for rel in _dedupe_list(target_files)
-        ]
-        return _dedupe_list(
-            project_paths
-            + [
-                "summaries/candidate_score_table.json",
-                "summaries/retrieval_diagnostics_summary.json",
-                "summaries/diff_summary.jsonl",
-                "summaries/evolution_summary.jsonl",
-                "summaries/best_candidates.json",
-                "summaries/iteration_index.json",
-                "pending_eval.json",
-            ]
-        )
-
-    def _bandit_read_paths(self, tool_access: dict[str, Any]) -> dict[str, dict[str, int]]:
-        out: dict[str, dict[str, int]] = {}
-        raw = tool_access.get("files_read") if isinstance(tool_access, dict) else {}
-        if not isinstance(raw, dict):
-            return out
-        for path, stats in raw.items():
-            normalized = self._bandit_normalize_access_path(str(path))
-            if not self._bandit_is_trackable_path(normalized):
-                continue
-            info = stats if isinstance(stats, dict) else {}
-            out[normalized] = {
-                "reads": max(1, int(info.get("reads") or 1)),
-                "lines": int(info.get("lines") or 0),
-            }
-        return out
-
-    def _bandit_written_paths(self, tool_access: dict[str, Any]) -> list[str]:
-        raw = tool_access.get("files_written") if isinstance(tool_access, dict) else {}
-        if not isinstance(raw, dict):
-            return []
-        return sorted(
-            {
-                normalized
-                for path in raw
-                if self._bandit_is_trackable_path(
-                    normalized := self._bandit_normalize_access_path(str(path))
-                )
-            }
-        )
-
-    def _bandit_normalize_access_path(self, raw_path: str) -> str:
-        text = raw_path.replace("\\", "/")
-        marker = "/workspace/"
-        if marker in text:
-            text = text.split(marker, 1)[1]
-        for marker in ("/source_snapshot/", "/summaries/", "/reference_iterations/", "/generated/"):
-            if marker in text:
-                return marker.strip("/") + "/" + text.split(marker, 1)[1].lstrip("/")
-        return text.lstrip("./")
-
-    def _bandit_is_trackable_path(self, path: str) -> bool:
-        if not path or "\n" in path or "\t" in path:
-            return False
-        if any(token in path for token in ("|", "[]", "(", ")", "@")):
-            return False
-        return (
-            path == "pending_eval.json"
-            or path in {"assignment.json", "workspace_manifest.json", "access_policy.json"}
-            or path.startswith("summaries/")
-            or path.startswith("reference_iterations/")
-            or path.startswith("source_snapshot/")
-            or path.startswith("generated/")
-        )
-
-    def _changed_paths_from_diff(self, diff_path: Path) -> list[str]:
-        if not diff_path.exists():
-            return []
-        out: list[str] = []
-        for line in diff_path.read_text(encoding="utf-8", errors="replace").splitlines():
-            if not line.startswith("diff --git "):
-                continue
-            parts = line.split()
-            if len(parts) >= 4:
-                out.append(parts[3].removeprefix("b/"))
-        return sorted(set(out))
-
-    def _load_json_file(self, path: Path) -> Any:
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return None
-
-    def _latest_proposer_tool_access(self, iteration: int) -> dict[str, Any]:
-        if not self.summary_path.exists():
-            return {}
-        for raw in reversed(self.summary_path.read_text(encoding="utf-8").splitlines()):
-            if not raw:
-                continue
-            try:
-                item = json.loads(raw)
-            except json.JSONDecodeError:
-                continue
-            if (
-                isinstance(item, dict)
-                and item.get("event") == "proposer_result"
-                and int(item.get("iteration") or 0) == iteration
-            ):
-                return {
-                    "files_read": item.get("files_read", {}),
-                    "files_written": item.get("files_written", {}),
-                }
-        return {}
-
-    def _bandit_last_improvement_iteration(
-        self,
-        candidates: list[CandidateResult],
-    ) -> int | None:
-        best = 0.0
-        last: int | None = None
-        for candidate in sorted(
-            candidates,
-            key=lambda item: ((_candidate_iteration(item.candidate_id) or 0), item.candidate_id),
-        ):
-            iteration = _candidate_iteration(candidate.candidate_id) or 0
-            if iteration <= 0:
-                continue
-            if candidate.passrate > best:
-                best = candidate.passrate
-                last = iteration
-        return last
-
-    _BANDIT_REF_ITER_RE = re.compile(r"reference_iterations/iter_(\d+)/")
-
-    def _iters_from_policy_paths(self, paths: list[str]) -> list[int]:
-        seen: set[int] = set()
-        out: list[int] = []
-        for path in paths:
-            match = self._BANDIT_REF_ITER_RE.search(str(path))
-            if not match:
-                continue
-            n = int(match.group(1))
-            if n in seen:
-                continue
-            seen.add(n)
-            out.append(n)
-        return out
 
     def _seed_passrate(self, candidates: list[CandidateResult]) -> float:
         """Return the seed (iter-0) candidate's passrate, or 0.0 if none.
@@ -3544,123 +2734,6 @@ class LocomoOptimizer:
         ]
         return max((item.passrate for item in seeds), default=0.0)
 
-    def _curaii_select_for_budget(
-        self,
-        existing_candidates: list[CandidateResult],
-        *,
-        iteration: int,
-        budget: str,
-        baseline_passrate: float,
-    ) -> tuple[int | None, tuple[int, ...] | None]:
-        """Budget-coupled curaii selection with a baseline-gated parent pool.
-
-        Returns ``(base_iter, refs_override)``:
-
-        * ``base_iter`` is the iteration whose archived candidate source
-          replaces the clean baseline in ``project_source/``.  ``None``
-          signals the empty-pool fallback — this iteration runs as if
-          policy were ``curai`` (clean baseline, default refs).
-        * ``refs_override`` is an explicit reference iteration tuple.
-          ``None`` means "fall through to ``_reference_iterations_for_budget``".
-
-        Eligibility: iter strictly less than the current iter, the
-        candidate's archived ``project_source/`` directory is on disk,
-        AND ``passrate > baseline_passrate`` (strict gate so tied parents
-        — the locomo failure mode — are excluded).
-
-        Budget mapping:
-
-        * ``low``    — base = best1 in the pool; refs = ``(base_iter,)``.
-        * ``medium`` — base = uniform random ∈ top-3 of pool; refs = the
-          (≤3) pool itself (sorted by iteration), so the proposer sees
-          the chosen base and its closest siblings.
-        * ``high``   — base = uniform random ∈ top-3 of pool; refs =
-          ``None`` (fall through to "all available").
-        """
-
-        eligible: list[tuple[int, CandidateResult]] = []
-        for item in existing_candidates:
-            base_iter = _candidate_iteration(item.candidate_id)
-            if base_iter is None or base_iter <= 0 or base_iter >= iteration:
-                continue
-            if item.passrate <= baseline_passrate:
-                continue
-            base_source = (
-                self._iteration_dir(base_iter)
-                / "source_snapshot"
-                / "candidate"
-                / "project_source"
-            )
-            if not base_source.exists():
-                continue
-            eligible.append((base_iter, item))
-
-        if not eligible:
-            return None, None
-
-        eligible.sort(key=lambda pair: _candidate_score(pair[1]), reverse=True)
-
-        if budget == "low":
-            best_iter = eligible[0][0]
-            return best_iter, (best_iter,)
-
-        pool = eligible[: min(3, len(eligible))]
-        chosen = random.choice(pool)[0]
-
-        if budget == "medium":
-            refs = tuple(sorted(it for it, _ in pool))
-            return chosen, refs
-
-        # high — refs fall through to "all available" via the standard
-        # _reference_iterations_for_budget path.
-        return chosen, None
-
-    def _pareto_select_base(
-        self,
-        existing_candidates: list[CandidateResult],
-        *,
-        iteration: int,
-        baseline_passrate: float,
-    ) -> int | None:
-        """Sample a patch base for the ``pareto`` selection policy.
-
-        Returns the iteration index of a candidate drawn uniformly at
-        random from the current passrate × token_consuming Pareto
-        frontier, restricted to candidates whose archived
-        ``project_source/`` is on disk and whose passrate strictly
-        exceeds the seed baseline (so a tied/worse parent is never
-        chosen). Returns ``None`` when no eligible frontier candidate
-        exists; the caller then falls back to the clean snapshot, i.e.
-        the same behavior as the ``default`` policy for that iter.
-
-        Reference iterations always fall through to "all available"
-        (``refs_override=None``) — pareto's only divergence from
-        ``default`` is the patch base, not the iter context budget.
-        """
-
-        frontier = self._quality_frontier(existing_candidates)
-        if not frontier:
-            return None
-        eligible: list[int] = []
-        for item in frontier:
-            base_iter = _candidate_iteration(item.candidate_id)
-            if base_iter is None or base_iter <= 0 or base_iter >= iteration:
-                continue
-            if item.passrate <= baseline_passrate:
-                continue
-            base_source = (
-                self._iteration_dir(base_iter)
-                / "source_snapshot"
-                / "candidate"
-                / "project_source"
-            )
-            if not base_source.exists():
-                continue
-            eligible.append(base_iter)
-        if not eligible:
-            return None
-        return random.choice(eligible)
-
     def _iteration_parent_map(self, *, iteration: int) -> dict[int, int]:
         """Reconstruct the patch-base parent edge for every prior iteration.
 
@@ -3674,108 +2747,181 @@ class LocomoOptimizer:
 
         parents: dict[int, int] = {}
         for i in range(1, iteration):
-            assignment = self._iteration_dir(i) / "assignment.json"
-            if not assignment.exists():
-                continue
-            try:
-                data = json.loads(assignment.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
-                continue
-            base = data.get("base_iter")
-            parents[i] = 0 if base is None else int(base)
+            base: int | None = None
+            # Prefer the proposer-DECLARED parent (candidate config
+            # ``base_iter`` in the archived pending_eval.json): under the
+            # ``self`` policy the proposer may replace or graft over the
+            # harness-materialised default, so its declaration is the honest
+            # lineage edge.
+            pending = self._iteration_dir(i) / "pending_eval.json"
+            if pending.exists():
+                try:
+                    payload = json.loads(pending.read_text(encoding="utf-8"))
+                    declared = (payload.get("candidates") or [{}])[0].get("base_iter")
+                    if declared is not None:
+                        base = int(declared)
+                except (json.JSONDecodeError, OSError, TypeError, ValueError):
+                    base = None
+            if base is None:
+                assignment = self._iteration_dir(i) / "assignment.json"
+                if not assignment.exists():
+                    continue
+                try:
+                    data = json.loads(assignment.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, OSError):
+                    continue
+                raw = data.get("base_iter")
+                base = 0 if raw is None else int(raw)
+            parents[i] = base
         return parents
 
-    def _island_select_base(
+    def _self_select_default_base(
         self,
         existing_candidates: list[CandidateResult],
         *,
         iteration: int,
-        baseline_passrate: float,
     ) -> int | None:
-        """Sample a patch base for the ``island`` selection policy.
+        """Default patch base for the ``self`` selection policy.
 
-        Maintains an evolution tree over iterations and balances exploit vs
-        explore with UCB1. passrate is the sole metric:
-
-        * Every node is an iteration; its parent is the patch base it was
-          grown from (``assignment.json``); the clean seed is node ``0``.
-        * A node is an expandable *leader* iff it is the immortal seed
-          (node ``0``), OR its passrate strictly beats the seed baseline AND
-          no direct child has strictly higher passrate. This is the
-          "child replaces parent" rule: once iter4 beats iter1, iter1 drops
-          out of the leader set and only iter4 stays expandable.
-        * Among leaders we maximise
-          ``passrate(n) + c * sqrt(ln(N+1) / (visits(n)+1))`` where
-          ``visits(n)`` is how many iterations already used ``n`` as a base.
-          The seed's low passrate is offset by its exploration bonus, so it
-          stays a perpetual explore reservoir.
-
-        Returns the chosen iteration index, or ``None`` when the seed (node
-        ``0``) wins — the caller then runs the iteration from the clean
-        snapshot, exactly like the ``default``/``pareto`` empty-pool
-        fallback.
+        Lex-best among prior candidates: passrate desc, average_score desc,
+        later iteration wins remaining ties — restricted to candidates whose
+        archived source snapshot is on disk and whose passrate strictly
+        exceeds the seed baseline. Returns ``None`` (clean seed) when nothing
+        beats the seed yet. This is only the DEFAULT materialised into
+        ``project_source/``; the proposer is free to override it (see
+        ``frontier_manifest.json`` + the Starting Point prompt block).
         """
 
-        # passrate per evaluated iteration (max over candidates sharing an iter)
-        passrate: dict[int, float] = {0: baseline_passrate}
+        baseline = self._seed_passrate(existing_candidates)
+        best_key: tuple[float, float, int] | None = None
         for item in existing_candidates:
-            item_iter = _candidate_iteration(item.candidate_id)
-            if item_iter is None or item_iter <= 0 or item_iter >= iteration:
+            base_iter = _candidate_iteration(item.candidate_id)
+            if base_iter is None or base_iter <= 0 or base_iter >= iteration:
                 continue
-            passrate[item_iter] = max(passrate.get(item_iter, 0.0), item.passrate)
-
-        parents = self._iteration_parent_map(iteration=iteration)
-
-        # visits(n) = number of evaluated iterations grown from n as a base;
-        # best_child(n) = the strongest direct child's passrate (replacement rule)
-        visits: dict[int, int] = {}
-        best_child: dict[int, float] = {}
-        for child, parent in parents.items():
-            if child not in passrate:
+            if item.passrate <= baseline:
                 continue
-            visits[parent] = visits.get(parent, 0) + 1
-            best_child[parent] = max(best_child.get(parent, -1.0), passrate[child])
-
-        def snapshot_exists(item_iter: int) -> bool:
             base_source = (
-                self._iteration_dir(item_iter)
+                self._iteration_dir(base_iter)
                 / "source_snapshot"
                 / "candidate"
                 / "project_source"
             )
-            return base_source.exists()
-
-        leaders: list[int] = [0]  # immortal clean-seed reservoir
-        for item_iter, item_passrate in passrate.items():
-            if item_iter == 0:
+            if not base_source.exists():
                 continue
-            if item_passrate <= baseline_passrate:
-                continue  # not worth exploiting over a clean start
-            if not snapshot_exists(item_iter):
-                continue
-            if best_child.get(item_iter, -1.0) > item_passrate:
-                continue  # superseded by a stronger child -> retired
-            leaders.append(item_iter)
-
-        total_visits = sum(visits.get(node, 0) for node in leaders)
-        log_term = math.log(total_visits + 1)
-        explore_c = self.config.island_explore_c
-
-        def ucb(node: int) -> float:
-            return passrate.get(node, 0.0) + explore_c * math.sqrt(
-                log_term / (visits.get(node, 0) + 1)
+            key = (
+                float(item.passrate),
+                float(item.average_score or 0.0),
+                base_iter,
             )
+            if best_key is None or key > best_key:
+                best_key = key
+        return None if best_key is None else best_key[2]
 
-        chosen = max(
-            leaders,
-            key=lambda node: (
-                ucb(node),
-                passrate.get(node, 0.0),
-                -visits.get(node, 0),
-                -node,
-            ),
-        )
-        return None if chosen == 0 else chosen
+    def _write_self_select_manifest(
+        self,
+        workspace_dir: Path,
+        existing_candidates: list[CandidateResult],
+        *,
+        iteration: int,
+        default_base_iter: int | None,
+        reference_iterations: tuple[int, ...],
+    ) -> None:
+        """Write ``frontier_manifest.json`` + ``task_score_matrix.json``.
+
+        The manifest gives the proposer every prior candidate's headline
+        metrics, hypothesis, lineage edge, and (when staged) the
+        workspace-relative path to its full source snapshot. The matrix is
+        the full iteration x task score history — deliberately NOT a
+        per-task max, so the proposer can judge variance from the raw
+        history instead of chasing one-off highs. Both files are staged for
+        the calib AND nowmc arms: the arm delta must stay confined to the
+        calibration protocol, not the evidence surface. Best-effort.
+        """
+
+        from worldcalib.prediction_feedback import load_score_breakdown
+
+        try:
+            parents = self._iteration_parent_map(iteration=iteration)
+            staged = set(reference_iterations)
+            rows: list[dict[str, Any]] = []
+            matrix: dict[str, dict[str, float]] = {}
+            ordered = sorted(
+                existing_candidates,
+                key=lambda c: (
+                    _candidate_iteration(c.candidate_id) or 0,
+                    c.candidate_id,
+                ),
+            )
+            for item in ordered:
+                cand_iter = _candidate_iteration(item.candidate_id) or 0
+                if cand_iter >= iteration and cand_iter != 0:
+                    continue
+                config = item.config if isinstance(item.config, dict) else {}
+                hypothesis = str(config.get("hypothesis") or "").strip()
+                snapshot_rel = (
+                    f"reference_iterations/iter_{cand_iter:03d}/source_snapshot"
+                    if cand_iter in staged
+                    else None
+                )
+                rows.append(
+                    {
+                        "iteration": cand_iter,
+                        "candidate_id": item.candidate_id,
+                        "passrate": item.passrate,
+                        "average_score": item.average_score,
+                        "parent_iter": parents.get(cand_iter),
+                        "hypothesis": hypothesis.split("\n")[0][:240],
+                        "source_snapshot": snapshot_rel,
+                        "is_default_base": cand_iter == default_base_iter,
+                    }
+                )
+                result_path = self._calib_result_path(item)
+                if result_path is None:
+                    continue
+                breakdown = load_score_breakdown(result_path)
+                col = f"iter_{cand_iter:03d}"
+                for task_id, cell in breakdown.items():
+                    if task_id == "all" or not isinstance(cell, dict):
+                        continue
+                    score = cell.get("average_score")
+                    if score is None:
+                        continue
+                    matrix.setdefault(str(task_id), {})[col] = float(score)
+
+            manifest = {
+                "iteration": iteration,
+                "default_base_iter": default_base_iter,
+                "note": (
+                    "YOU choose the parent. Each staged candidate's full source "
+                    "is at <source_snapshot>; the default base is already in "
+                    "project_source/. Judge per-task variance from "
+                    "task_score_matrix.json history, not single highs."
+                ),
+                "candidates": rows,
+            }
+            (workspace_dir / "frontier_manifest.json").write_text(
+                json.dumps(manifest, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            (workspace_dir / "task_score_matrix.json").write_text(
+                json.dumps(
+                    {
+                        "metric": "average_score per task/type, one column per iteration",
+                        "tasks": matrix,
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+        except Exception as exc:  # noqa: BLE001 - advisory artifacts only
+            self._append_event(
+                {
+                    "event": "self_select_manifest_failed",
+                    "iteration": iteration,
+                    "error": repr(exc),
+                }
+            )
 
     def _state_snapshot_base_iteration(
         self,
@@ -3819,12 +2965,6 @@ class LocomoOptimizer:
             for item in self._candidate_iterations(candidates)
             if 0 < item < iteration and self._iteration_dir(item).exists()
         }
-        if self.config.selection_policy == "recent":
-            return self._recent_reference_iterations(available)
-        if self.config.selection_policy == "random":
-            return self._random_reference_iterations(available, iteration=iteration)
-        if self.config.selection_policy == "best":
-            return self._best_reference_iterations(available, candidates)
         if budget == "high":
             return tuple(sorted(available))
 
