@@ -164,20 +164,15 @@ class OptimizerConfig:
     organized: bool = False
     organized_state_md: bool = True
     organized_include_summaries: bool = False
-    # Proposer world-model variant. "prose" = the append-only
-    # world_model_calibration.md protocol. "critic" = ledger + adversarial
-    # reference-class critic subagent, no prose calibration file.
-    proposer_variant: str = "prose"
-    # When True (critic variant only), reject a candidate that did not produce
-    # a compliant critique.md / P(regress). When False, compliance is logged
-    # but the candidate is still evaluated — use the soft mode until a pilot
-    # confirms the critic flow runs end-to-end, then enforce.
-    critic_gate_enforce: bool = False
+    # Proposer world-model variant. "calib" (default) = self-distill WMC: the
+    # append-only world_model_calibration.md protocol + a per-iter
+    # prediction.md the proposer self-grades next iter (no external critic).
+    # "nowmc" = pure-default ablation with no calibration protocol at all.
+    proposer_variant: str = "calib"
     # Before the full eval, run the candidate on this many probe tasks; if it
     # produces zero model output on all of them (a runtime crash like the
     # KeyError that wiped iter_29), skip it instead of burning a full eval.
-    # 0 disables the probe (default, so the prose/no-wmc baselines are
-    # unaffected); the critic launcher sets it to ~3.
+    # 0 disables the probe (default).
     dry_run_probe_k: int = 0
     # --- Designer mode (long autonomous session; AutoLab only) ---
     # When True, run() skips the per-iteration loop and launches ONE long
@@ -854,7 +849,7 @@ class LocomoOptimizer:
             return []
         if proposer_unclean:
             # Salvage a candidate the proposer had already finished writing
-            # before it was killed. max-effort + critic-subagent sessions
+            # before it was killed. max-effort sessions
             # routinely complete pending_eval.json but fail to exit within
             # propose_timeout_s; the kill (returncode=None) also drops the
             # final usage message, so metrics show 0 tokens even though a
@@ -980,38 +975,6 @@ class LocomoOptimizer:
                 }
             )
             proposed = proposed[:1]
-        critic_compliant, critic_checks = self._check_critic_compliance(
-            iteration, workspace_dir, policy_name
-        )
-        if not critic_compliant and self.config.critic_gate_enforce:
-            if critic_checks.get("verdict_revise"):
-                reject_reason = "verdict_revise"
-            else:
-                reject_reason = "missing_critic_artifacts"
-            rejected_candidate = proposed[0] if proposed else {}
-            descriptor = {
-                key: rejected_candidate.get(key)
-                for key in ("name", "build_tag", "scaffold_name", "hypothesis")
-                if isinstance(rejected_candidate, dict)
-                and rejected_candidate.get(key)
-            }
-            self._append_event(
-                {
-                    "iteration": iteration,
-                    "event": "critic_gate_rejected",
-                    "selection_policy": policy_name,
-                    "budget": budget,
-                    "reject_reason": reject_reason,
-                    "verdict": critic_checks.get("verdict"),
-                    "base_rate": critic_checks.get("base_rate"),
-                    "p_regress": critic_checks.get("p_regress"),
-                    "candidate": descriptor,
-                }
-            )
-            # Fold the veto into the world model NOW so the very next proposer
-            # sees it (a rejected iter never reaches the post-eval distill).
-            self._update_calibration_track_record()
-            return []
         for raw in proposed:
             if isinstance(raw, dict):
                 self._normalize_workspace_candidate_paths(
@@ -1067,7 +1030,6 @@ class LocomoOptimizer:
             self.run_store.commit_iteration(iteration)
         self._refresh_run_store(iteration)
         self._refresh_run_indexes(existing_candidates + evaluated)
-        self._update_calibration_track_record()
         self._score_prediction_feedback(
             iteration, evaluated, workspace_dir, existing_candidates
         )
@@ -1240,12 +1202,11 @@ class LocomoOptimizer:
     def _proposer_skill_key(self) -> str:
         """Return the benchmark skill key for this run.
 
-        The non-prose proposer variants route to a ``<benchmark>_<variant>``
-        skill: ``critic`` (ledger + adversarial critic), ``calib`` (prose WMC +
-        graded prediction), and ``nowmc`` (pure-default ablation, no calibration
-        protocol). It is an error to request a variant for a benchmark that has
-        no matching skill, so a misconfiguration fails loudly instead of
-        silently falling back to the prose protocol.
+        The two proposer variants route to a ``<benchmark>_<variant>`` skill:
+        ``calib`` (self-distill WMC + self-graded per-task prediction) and
+        ``nowmc`` (pure-default ablation, no calibration protocol). It is an
+        error to request a variant for a benchmark that has no matching skill,
+        so a misconfiguration fails loudly.
         """
 
         from worldcalib.prompts import benchmark_skill_name, proposer_skill_path
@@ -1254,16 +1215,18 @@ class LocomoOptimizer:
             benchmark_name=self._benchmark_prompt_name(),
             target_system=self.config.progressive_target_system,
         )
-        if self.config.proposer_variant in ("critic", "calib", "nowmc"):
-            suffix = self.config.proposer_variant
-            variant_key = f"{key}_{suffix}"
-            if not proposer_skill_path(variant_key).exists():
-                raise ValueError(
-                    f"proposer_variant='{suffix}' requested but no skill "
-                    f"exists at skills/{variant_key}/SKILL.md"
-                )
-            return variant_key
-        return key
+        suffix = self.config.proposer_variant
+        if suffix not in ("calib", "nowmc"):
+            raise ValueError(
+                f"unknown proposer_variant={suffix!r} (expected 'calib' or 'nowmc')"
+            )
+        variant_key = f"{key}_{suffix}"
+        if not proposer_skill_path(variant_key).exists():
+            raise ValueError(
+                f"proposer_variant='{suffix}' requested but no skill "
+                f"exists at skills/{variant_key}/SKILL.md"
+            )
+        return variant_key
 
     def _resolve_proposer_skill(self) -> str:
         """Return the resolved per-benchmark proposer skill text.
@@ -1380,8 +1343,8 @@ class LocomoOptimizer:
         env: dict[str, str] = {
             "TRACE_DB": str(self._workspace_visible_path(workspace_dir, "traces/index.db")),
             # trace_similar joins proposal_outcomes here for a deterministic,
-            # parent-relative passrate_delta per neighbour (the critic must not
-            # hand-compute the base rate).
+            # parent-relative passrate_delta per neighbour (the proposer must
+            # not hand-compute the base rate).
             "RUNSTORE_DB": str(runstore_db),
             "PYTHONPATH": str(self._mcp_pythonpath(workspace_dir)),
         }
@@ -1530,108 +1493,7 @@ class LocomoOptimizer:
             "\n".join(lines) + "\n", encoding="utf-8"
         )
 
-    def _check_critic_compliance(
-        self, iteration: int, workspace_dir: Path, policy_name: str
-    ) -> tuple[bool, dict[str, Any]]:
-        """Check & log whether the critic variant produced its mandated
-        artifacts (``critique.md`` with a base rate, ``prediction.md`` with a
-        ``P(regress)``). Always logs a ``critic_compliance`` event; returns
-        ``(compliant, checks)`` where ``checks`` carries the signals the caller
-        folds into a ``critic_gate_rejected`` event (verdict, base_rate,
-        p_regress, optimism_discount, verdict_revise). Enforcement (rejection)
-        is the caller's job, gated on ``critic_gate_enforce``.
-
-        No-op (returns ``(True, {})``) for the prose variant.
-        """
-
-        if self.config.proposer_variant != "critic":
-            return True, {}
-        from worldcalib.calibration_track_record import (
-            parse_critique_signals,
-            parse_prediction_signals,
-        )
-
-        crit = workspace_dir / "critique.md"
-        pred = workspace_dir / "prediction.md"
-        crit_text = crit.read_text(encoding="utf-8") if crit.exists() else ""
-        pred_text = pred.read_text(encoding="utf-8") if pred.exists() else ""
-        p_regress, _ = parse_prediction_signals(pred_text)
-        base_rate, verdict = parse_critique_signals(crit_text)
-        # Optimism discount: the proposer stated a P(regress) below the critic's
-        # reference-class base rate (iter23 did 0.30 vs a 0.375 base rate, then
-        # regressed -0.29). A tiny tolerance absorbs rounding.
-        optimism_discount = (
-            p_regress is not None
-            and base_rate is not None
-            and p_regress < base_rate - 1e-6
-        )
-        verdict_revise = verdict == "revise"
-        checks = {
-            "critique_present": bool(crit_text.strip()),
-            "has_reference_class": "reference class" in crit_text.lower(),
-            "has_base_rate": "base rate" in crit_text.lower(),
-            "prediction_present": bool(pred_text.strip()),
-            "p_regress_present": p_regress is not None,
-            "p_regress": p_regress,
-            "base_rate": base_rate,
-            "verdict": verdict,
-            "optimism_discount": optimism_discount,
-            "verdict_revise": verdict_revise,
-        }
-        # The gate enforces only the critic's hard verdict (a `revise` the
-        # proposer shipped against) plus the presence of the mandated artifacts.
-        # optimism_discount is still computed and logged for the calibration
-        # record but no longer gates: P(regress) is a scored prediction, not a
-        # veto threshold. The critic SKILL is now a block-list — only per-type
-        # special-casing / reward-hacking earns a `revise` — so blanket-vetoing
-        # same-family retries (which froze the search at 0.38) no longer happens.
-        compliant = bool(
-            checks["critique_present"]
-            and checks["has_base_rate"]
-            and checks["p_regress_present"]
-            and not verdict_revise
-        )
-        self._append_event(
-            {
-                "iteration": iteration,
-                "event": "critic_compliance",
-                "selection_policy": policy_name,
-                "compliant": compliant,
-                "enforced": self.config.critic_gate_enforce,
-                **checks,
-            }
-        )
-        return compliant, checks
-
-    def _update_calibration_track_record(self) -> None:
-        """Regenerate the critic variant's world model after an eval.
-
-        Writes both ``calibration_track_record.md`` (the P(regress) scorecard)
-        and ``world_model.md`` (the cumulative WMC document the proposer reads
-        before proposing). Both are distilled deterministically from the
-        just-updated ledger; best-effort, never breaks the loop.
-        """
-
-        if self.config.proposer_variant != "critic":
-            return
-        try:
-            from worldcalib.calibration_track_record import write_track_record
-
-            write_track_record(self.run_dir)
-        except Exception as exc:  # noqa: BLE001
-            self._append_event(
-                {"event": "calibration_track_record_failed", "error": repr(exc)}
-            )
-        try:
-            from worldcalib.world_model_distiller import write_world_model
-
-            write_world_model(self.run_dir)
-        except Exception as exc:  # noqa: BLE001
-            self._append_event(
-                {"event": "world_model_distill_failed", "error": repr(exc)}
-            )
-
-    # ---- calib variant: external prediction-accuracy critic ----------------
+    # ---- calib variant: hidden mechanical prediction telemetry --------------
 
     def _calib_result_path(self, candidate: CandidateResult) -> Path | None:
         """Resolve a candidate's result json to an absolute path."""
@@ -1803,26 +1665,12 @@ class LocomoOptimizer:
         at workspace-relative paths so SKILL.md doesn't depend on knowing
         the docker mount layout.
 
-        No-op for the ``critic`` variant: it has no prose calibration file and
-        sources history from the RunStore ledger instead.
-
         Hard no-op for the ``nowmc`` variant: the pure-default ablation carries
         no calibration protocol at all (no prose file, no prediction, no
         world model), so nothing is staged into the workspace.
         """
 
         if self.config.proposer_variant == "nowmc":
-            return
-
-        if self.config.proposer_variant == "critic":
-            # No prose calibration; stage the deterministically distilled
-            # world_model.md (proven stack / effective+failed mechanisms /
-            # calibration record / open problems) so the proposer reads it
-            # before proposing (SKILL workflow step 0).
-            for name in ("world_model.md", "calibration_track_record.md"):
-                src = self.run_dir / name
-                if src.exists():
-                    shutil.copy2(src, workspace_dir / name)
             return
 
         src = self.run_dir / "world_model_calibration.md"
@@ -1834,6 +1682,7 @@ class LocomoOptimizer:
             )
             if prev.exists():
                 shutil.copy2(prev, workspace_dir / "prev_prediction.md")
+
     def _sync_calibration_back_from_workspace(self, cwd: Path | None) -> None:
         """If the proposer appended to its workspace-local calibration copy,
         promote that back to the run-level file. Idempotent if unchanged.
