@@ -111,12 +111,9 @@ Only write claims the next iter's measurements could disconfirm.
             )
             path.write_text(text, encoding="utf-8")
 
-    # ── self-distill: disable the external prediction critic ─────────────────
-
-    def _score_prediction_feedback(self, *args: Any, **kwargs: Any) -> None:
-        # Self-distill protocol: the proposer grades its own prediction next
-        # iter. No external critic, no critic_feedback.md.
-        return None
+    # NOTE: the base ``_score_prediction_feedback`` is hidden mechanical
+    # telemetry only (no LLM critic, never staged into a workspace), so the
+    # self-distill protocol holds without an override here.
 
     # ── abstract hooks each backend implements ────────────────────────────────
 
