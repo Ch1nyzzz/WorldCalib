@@ -43,6 +43,26 @@ tool available to you, optional and at your discretion. The per-trajectory
 failure analysis (deep-reading many task trajectories) is a natural thing to
 delegate.
 
+## Choosing your parent (self-select)
+
+The harness materialises the current lex-best candidate (passrate first,
+average_score tiebreak) into your editable source as the DEFAULT parent, but
+the choice is yours:
+
+- BEFORE the Analyze step, read `frontier_manifest.json` (every prior
+  candidate's passrate / average_score / hypothesis / parent edge / snapshot
+  path) and `task_score_matrix.json` (the full iteration x task score
+  history).
+- Judge per-task variance from the matrix history. A one-off high on a noisy
+  task is not a frontier — do not chase it; a mechanism that repeats across
+  iterations is.
+- You may keep the default parent, wholesale-copy any
+  `reference_iterations/iter_NNN/source_snapshot/` over your editable source,
+  or graft mechanisms from several prior iterations.
+- Declare the parent you actually built on in the candidate config as
+  `"base_iter": <N>` (`0` = clean seed). If you replaced the default or
+  grafted, say so in one line of the hypothesis.
+
 ## Workflow
 
 1. **Analyze.** Read the available evidence (see *Evidence interface* below) and

@@ -223,7 +223,7 @@ setsid worldcalib-optimize \
   "${autolab_args[@]}" \
   --split train \
   --proposer-variant "$PROPOSER_VARIANT" \
-  --selection-policy pareto \
+  --selection-policy self \
   --no-summary \
   --run-id "$run_id" \
   --out "runs/${run_id}" \

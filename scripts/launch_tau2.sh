@@ -89,7 +89,7 @@ TAU2_RUNS="${TAU2_RUNS:-1}"
 # replaces-parent leader rule) evolves each candidate from the CURRENT best
 # instead of always re-baselining from the clean seed (`default`), so gains
 # compound across iterations. ISLAND_EXPLORE_C tunes explore-vs-exploit.
-SELECTION_POLICY="${SELECTION_POLICY:-island}"
+SELECTION_POLICY="${SELECTION_POLICY:-self}"
 ISLAND_EXPLORE_C="${ISLAND_EXPLORE_C:-0.5}"
 
 # Shared iter-0 seed (see header). When set, clone it in and continue from iter 1.

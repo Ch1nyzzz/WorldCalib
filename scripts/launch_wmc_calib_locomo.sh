@@ -63,7 +63,7 @@ setsid worldcalib-optimize \
   --locomo \
   --proposer-variant calib \
   --dry-run-probe-k "${DRY_RUN_PROBE_K:-3}" \
-  --selection-policy default \
+  --selection-policy self \
   --no-summary \
   --run-id "$run_id" \
   --out "runs/${run_id}" \
