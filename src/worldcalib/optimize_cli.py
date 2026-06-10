@@ -210,31 +210,20 @@ def _add_common_optimize_args(parser: argparse.ArgumentParser) -> None:
         help=(
             "Path to a previous run's world_model_calibration.md to seed this run. "
             "If omitted, the run starts with the bootstrap template. "
-            "Ignored when --proposer-variant=critic (that variant has no prose file)."
+            "Ignored when --proposer-variant=nowmc (no calibration file)."
         ),
     )
     parser.add_argument(
         "--proposer-variant",
-        choices=("prose", "critic", "calib", "nowmc"),
-        default="prose",
+        choices=("calib", "nowmc"),
+        default="calib",
         help=(
-            "Proposer world-model variant. 'prose' = append-only "
-            "world_model_calibration.md protocol (default). 'critic' = ledger + "
-            "adversarial reference-class critic subagent. 'calib' = prose WMC + a "
-            "two-sided prediction graded after eval by an external critic "
-            "(prediction accuracy becomes an optimized scalar; routes to the "
-            "<benchmark>_calib skill). 'nowmc' = pure-default ablation with NO "
-            "calibration protocol of any kind (no prose file, no prediction, no "
-            "critic; routes to the <benchmark>_nowmc skill)."
-        ),
-    )
-    parser.add_argument(
-        "--critic-gate-enforce",
-        action="store_true",
-        help=(
-            "Critic variant only: reject a candidate that did not produce a "
-            "compliant critique.md / P(regress). Default off (soft): compliance "
-            "is logged but the candidate is still evaluated."
+            "Proposer world-model variant. 'calib' (default) = self-distill "
+            "WMC: append-only world_model_calibration.md + a per-task "
+            "prediction.md the proposer self-grades next iter (no external "
+            "critic; routes to the <benchmark>_calib skill). 'nowmc' = "
+            "pure-default ablation with NO calibration protocol of any kind "
+            "(routes to the <benchmark>_nowmc skill)."
         ),
     )
     parser.add_argument(
@@ -461,8 +450,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     out_dir = args.out or Path("runs") / run_id
 
-    # The critic and nowmc variants have no prose calibration file to seed.
-    if args.proposer_variant not in ("critic", "nowmc"):
+    # The nowmc variant has no calibration file to seed.
+    if args.proposer_variant != "nowmc":
         _seed_calibration(out_dir, args.prev_calibration)
 
     if args.scaffolds:
@@ -531,7 +520,6 @@ def main(argv: list[str] | None = None) -> int:
         proposer_docker_env=tuple(args.proposer_docker_env),
         proposer_docker_mount=tuple(args.proposer_docker_mount),
         proposer_variant=args.proposer_variant,
-        critic_gate_enforce=args.critic_gate_enforce,
         dry_run_probe_k=args.dry_run_probe_k,
         designer=args.designer,
         designer_min_directions=args.designer_min_directions,
