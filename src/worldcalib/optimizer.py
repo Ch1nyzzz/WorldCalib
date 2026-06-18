@@ -299,6 +299,7 @@ class LocomoOptimizer:
                 candidate = CandidateResult.from_dict(item)
                 candidates.append(candidate)
                 self._append_summary(iteration=0, candidate=candidate)
+            self._write_seed_run_summary(candidates)
         else:
             if self.config.resume and not (self.run_dir / "candidate_results").exists():
                 raise ValueError(
@@ -3640,6 +3641,31 @@ class LocomoOptimizer:
             flags[iteration] = iteration in frontier_iters
         if flags:
             self.trace_harness.indexer.refresh_pareto_frontier(flags)
+
+    def _write_seed_run_summary(self, seed_candidates: list[CandidateResult]) -> None:
+        """Persist the iter-0 seed frontier as a root-level ``run_summary.json``.
+
+        This lets a sibling run reuse this exact iter-0 baseline via
+        ``--baseline-dir`` (``load_baseline_candidates`` reads ``run_summary.json``
+        and filters by the top-level ``split``), so two ablation arms can share a
+        single seed evaluation instead of each paying for — and re-randomising —
+        their own. Written unconditionally: ``--no-summary`` governs only the
+        summaries staged into the proposer workspace, not run-root artifacts.
+        """
+        summary_path = self.run_dir / "run_summary.json"
+        if summary_path.exists():
+            return
+        payload = {
+            "run_id": self.config.run_id,
+            "split": self.config.split,
+            "limit": self.config.limit,
+            "candidate_count": len(seed_candidates),
+            "candidates": [candidate.to_dict() for candidate in seed_candidates],
+        }
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+        summary_path.write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
 
     def _append_summary(
         self,
