@@ -613,8 +613,13 @@ class AutolabHarborRunner:
             job_name,
             "-k",
             str(self.n_attempts),
+            # -n = harbor's "concurrent trials": run this task's n_attempts
+            # trials in parallel rather than serially. Sourced from
+            # --autolab-concurrency (self.concurrency); was hardcoded to 1,
+            # which silently pinned every task to serial trials regardless of
+            # the flag.
             "-n",
-            "1",
+            str(self.concurrency),
             "--timeout-multiplier",
             str(multiplier),
             "-y",
