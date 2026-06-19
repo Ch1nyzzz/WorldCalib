@@ -24,3 +24,7 @@ references/
 
 # SWE-bench instance data — large (~50MB), fetched/derived, not tracked
 data/swebench_*.json
+
+# Stray SWE-bench per-instance eval report summaries (run_evaluation writes
+# <run_id>.<instance>.json to cwd); the full logs live under logs/run_evaluation/
+memomemo_candidate.*.json
