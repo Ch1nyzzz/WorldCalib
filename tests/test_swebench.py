@@ -456,6 +456,7 @@ def test_miniswe_runner_keeps_api_key_out_of_argv(tmp_path, monkeypatch) -> None
         base_url="https://example.test/v1",
         api_key=None,
         api_key_env="TOGETHER_API_KEY",
+        model_class=module.DEFAULT_MODEL_CLASS,
         step_limit=0,
         max_tokens=128,
         temperature=0.0,
@@ -466,6 +467,13 @@ def test_miniswe_runner_keeps_api_key_out_of_argv(tmp_path, monkeypatch) -> None
     assert "secret-token" not in " ".join(captured["cmd"])
     assert captured["env"]["OPENAI_API_KEY"] == "secret-token"
     assert patch_path.read_text(encoding="utf-8") == "diff --git a/x b/x\n"
+    # The runner must pass a model class that exists in mini-SWE-agent's
+    # registry (litellm_textbased), never the stale qwen35 default that crashed
+    # every candidate at startup.
+    cmd = captured["cmd"]
+    assert "--model-class" in cmd
+    assert cmd[cmd.index("--model-class") + 1] == "litellm_textbased"
+    assert "qwen35_miniswe_model.Qwen35TextModel" not in cmd
 
 
 def test_swebench_runner_records_timeout_without_late_patch(tmp_path) -> None:
