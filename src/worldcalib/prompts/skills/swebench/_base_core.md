@@ -26,6 +26,26 @@ cannot tell the difference from the train score, so:
 - Before submitting, name a class of currently-passing issues the change could
   break, and argue why it won't. If you can't, the change is not ready.
 
+## Target runtime — fixed, do not adapt to a different model
+
+The solver model is **`deepseek-v4-flash`, served through DeepSeek's official
+OpenAI-compatible API** (`https://api.deepseek.com/v1`). It is **fixed**: you are
+optimizing the *scaffold* (prompts, tools, control loop, submission handling),
+never the model.
+
+- **Do not swap or wrap the model.** Do not change `model_class`, do not add a
+  custom `Model` subclass, do not register a new entry in
+  `_MODEL_CLASS_MAPPING`. The default LiteLLM model class already routes to the
+  served target; replacing it is off-task and a frequent self-destruct (an
+  unregistered/incomplete model class makes the agent crash at startup with an
+  empty patch before the first call).
+- **It is not a vLLM-served model.** The DeepSeek API does **not** honor
+  vLLM/Qwen chat-template knobs such as `chat_template_kwargs.enable_thinking`,
+  and `deepseek-v4-flash` does **not** emit `<think>...</think>` blocks — any
+  mechanism built around those is inert cargo-cult, not a real change.
+- **Edit only `src/`.** Files under `build/lib/` are a stale build artifact that
+  the runtime does not import; editing them changes nothing and wastes budget.
+
 ## Search space
 
 The search space is the candidate source itself — arbitrary Python in the

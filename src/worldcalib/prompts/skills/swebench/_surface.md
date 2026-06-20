@@ -1,41 +1,41 @@
 ---
 name: worldcalib-proposer-swebench-surface
-description: SWE-bench-specific evolving surface for the coding-agent proposer — the mini-SWE-agent control loop you edit, the source-backed snapshot you point pending_eval.json at, and the swebench pending_eval conventions (exactly one candidate, extra.source_project_path, hypothesis fields). Spliced ahead of the shared base core; shared by both the swebench_calib and swebench_nowmc arms.
+description: SWE-bench backend contract for the coding-agent proposer — what the editable mini-SWE-agent snapshot contains, the only hard constraints (solver model LOCKED; tests/grading OFF-LIMITS; reward-hacking ban), and the pending_eval output contract. No failure-mode taxonomy and no mechanism suggestions: the proposer analyses all the feedback and patches the agent itself. Spliced ahead of the shared base core; shared by both the swebench_calib and swebench_nowmc arms.
 ---
 
 ## What you are evolving
 
-You are evolving the **mini-SWE-agent control loop** — the coding agent that
-resolves SWE-bench issues. Each task = one real software-engineering issue (a
-problem statement plus a repo at a base commit); the agent works in a sandboxed
+You are evolving the **mini-SWE-agent** — the coding agent that resolves
+SWE-bench issues. Each task = one real software-engineering issue (a problem
+statement plus a repo at a base commit); the agent works in a sandboxed
 checkout, edits source, and produces a patch, scored by whether the repo's
 **fail-to-pass and pass-to-pass tests** turn green. The primary metric is
-`passrate` — the fraction of issues resolved.
-
-There is a frozen target LLM underneath (the solver model is fixed); you evolve
-the *agent strategy wrapped around it* — the control loop, prompts, tool/command
-execution, observation handling, and submission logic.
+`passrate` — the fraction of issues resolved. The frozen solver LLM underneath
+is the fixed SUT; you evolve the agent wrapped around it.
 
 The runtime candidate is the source-backed scaffold `mini_swe_agent_source`,
 loaded from the edited snapshot named in `extra.source_project_path`. The
 editable surface is the copied mini-SWE-agent source tree under
-`candidate/upstream_source/mini-swe-agent/**` (plus the optional generated
-wrapper directory). Concretely you may:
+`candidate/upstream_source/mini-swe-agent/**` (the control loop in
+`src/minisweagent/**`, the prompt/observation templates, tool/command execution,
+submission logic, …) plus the optional generated wrapper directory. You may edit
+any file in that tree **and add new files/modules** — the whole snapshot
+propagates to the eval run, so new modules are importable.
 
-- reshape how the agent is prompted (system/instance templates, how observations
-  and prior steps are rendered, how the issue and repo context are framed);
-- restructure the control loop in `src/minisweagent/**` — step budgeting,
-  when/how the model is called, how commands are parsed and executed, how command
-  output is truncated/summarized/fed back, retries, and the stop/submit decision;
-- add a verification or self-check step (e.g. run the repro before submitting,
-  diff review, test-aware finalization);
-- replace a mechanism wholesale (a different loop topology, context strategy, or
-  information-flow structure).
+Anything in that surface is agent you may rewrite however the evidence directs —
+there is no prescribed lever or failure mode; read the source and the feedback
+and decide.
 
-**Do not assume any fixed prompt or loop structure** — choose the mechanism that
-targets a real failure mode you observed in the traces.
+## Hard constraints (the only fences)
 
-## pending_eval.json conventions
+- **The solver model is LOCKED.** Never change the model / provider, add a
+  second model, or alter the fixed sampling params.
+- **OFF-LIMITS — never edit, read for the answer, or bypass:** the SWE-bench
+  test harness and grading (the fail-to-pass / pass-to-pass tests and the repo's
+  evaluation machinery). Do not branch on a task / instance name or hardcode an
+  issue's patch — that is reward-hacking and is rejected.
+
+## pending_eval.json contract
 
 The exact output path and JSON schema (with live substitutions) are in the
 iteration message. Independent of those:
@@ -45,7 +45,6 @@ iteration message. Independent of those:
   under `source_snapshot/candidate/upstream_source/mini-swe-agent`.
 - If you create a wrapper module under the generated directory, keep it small and
   route source-backed mechanisms through the clean edited snapshot.
-- The `hypothesis` field must state: the observed failure mode being targeted,
-  the expected `passrate` direction and cost impact, why the change should
-  transfer beyond the scored split, and one class of currently-passing issues it
-  could break (and why it won't).
+- `top_k` is a single integer (set to 1).
+- The `hypothesis` field: the change you made, the expected `passrate` direction
+  and cost impact, and the evidence it came from.
