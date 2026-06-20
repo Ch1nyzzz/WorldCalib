@@ -25,4 +25,3 @@ what holds across iterations.
 
 <!-- INCLUDE: swebench/_base_core.md -->
 
-<!-- INCLUDE: swebench/_tail.md -->

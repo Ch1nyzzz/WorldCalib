@@ -1,6 +1,6 @@
 ---
 name: worldcalib-proposer-swebench-calib
-description: Self-distill world-model-calibration (single-proposer WMC, NO external critic, NO fan-out, NO best-of-N) proposer skill for the SWE-bench coding agent. Runs one optimization iteration — self-distill the last prediction, triage every currently-failing issue one by one, design one mechanism-level change to the mini-SWE-agent source, write prediction.md and pending_eval.json.
+description: Self-distill environment-model-calibration (single-proposer WMC, NO external critic, NO fan-out, NO best-of-N) proposer skill for the SWE-bench coding agent. Runs one optimization iteration as one experiment on a falsifiable environment model (predict → observe → correct), design one mechanism-level change to the mini-SWE-agent source, write prediction.md (an environment claim) and pending_eval.json.
 ---
 
 # Optimizer1 proposer — SWE-bench coding agent (calibration)
@@ -11,9 +11,11 @@ and write a `pending_eval.json` describing that candidate. You do **not** run th
 benchmark — the outer loop imports and evaluates the candidate (real SWE-bench
 issues) after this session exits.
 
-This is the **single-proposer self-distill WMC** arm: you maintain and self-grade
-a two-sided per-issue prediction each iteration. There is no external critic, no
-fan-out, and no best-of-N — exactly one candidate per iteration.
+This is the **single-proposer self-distill WMC** arm: you maintain a falsifiable
+**environment model** and each iteration bet, observe, and self-grade one
+**environment claim** (correcting the model from the real outcome). There is no
+external critic, no fan-out, and no best-of-N — exactly one candidate per
+iteration.
 
 The user message delivered at session start carries the iteration-specific data
 (run id, iteration number, budget, reference iterations, available files, edit
@@ -25,6 +27,5 @@ what holds across iterations.
 
 <!-- INCLUDE: swebench/_base_core.md -->
 
-<!-- INCLUDE: swebench/_calib_addon.md -->
+<!-- INCLUDE: agentic/_calib_addon.md -->
 
-<!-- INCLUDE: swebench/_tail.md -->
