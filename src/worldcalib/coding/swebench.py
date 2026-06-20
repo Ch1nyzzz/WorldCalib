@@ -263,6 +263,7 @@ class MiniSweAgentSourceRunner:
                     "repo": instance.repo,
                     "base_commit": instance.base_commit,
                     "patch_path": str(patch_path),
+                    "patch_bytes": 0,
                 },
             )
 
@@ -332,6 +333,7 @@ class MiniSweAgentSourceRunner:
                     "duration_s": time.time() - started,
                     "timed_out": True,
                     "timeout_s": self.timeout_s,
+                    "patch_bytes": 0,
                 },
             )
         duration_s = time.time() - started
@@ -371,24 +373,40 @@ class MiniSweAgentSourceRunner:
         passed = completed.returncode == 0 and evaluator_returncode == 0
         if evaluator_returncode is None:
             passed = False
+        exit_status = _read_agent_exit_status(task_dir)
+        patch_text = patch_path.read_text(encoding="utf-8", errors="ignore")
+        metadata: dict[str, Any] = {
+            "benchmark": "swebench",
+            "agent": DEFAULT_MINI_SWE_AGENT_NAME,
+            "source_project_path": str(source_path),
+            "repo": instance.repo,
+            "base_commit": instance.base_commit,
+            "patch_path": str(patch_path),
+            "task_dir": str(task_dir),
+            "returncode": completed.returncode,
+            "evaluator_returncode": evaluator_returncode,
+            "duration_s": duration_s,
+            "exit_status": exit_status,
+            # Empty-vs-non-empty diff is the signal that separates a self-destruct
+            # / empty submission (a broken harness) from a real patch that failed
+            # the hidden tests (a model gap). Surface it so the proposer's
+            # frame-audit does not have to open every raw patch file.
+            "patch_bytes": len(patch_text.strip()),
+        }
+        # When the agent self-destructed (an uncaught exception, or any non-
+        # Submitted terminal state that produced no patch), attach the stdout
+        # tail so the proposer sees the actual traceback instead of guessing.
+        if exit_status and exit_status != "Submitted" and not exit_status.startswith("Submit"):
+            tail = _read_stdout_tail(task_dir)
+            if tail:
+                metadata["error_tail"] = tail
         return CodingAgentRun(
-            prediction=patch_path.read_text(encoding="utf-8", errors="ignore"),
+            prediction=patch_text,
             passed=passed,
             score=1.0 if passed else 0.0,
             prompt_tokens=_int_metadata(candidate, "prompt_tokens"),
             completion_tokens=_int_metadata(candidate, "completion_tokens"),
-            metadata={
-                "benchmark": "swebench",
-                "agent": DEFAULT_MINI_SWE_AGENT_NAME,
-                "source_project_path": str(source_path),
-                "repo": instance.repo,
-                "base_commit": instance.base_commit,
-                "patch_path": str(patch_path),
-                "task_dir": str(task_dir),
-                "returncode": completed.returncode,
-                "evaluator_returncode": evaluator_returncode,
-                "duration_s": duration_s,
-            },
+            metadata=metadata,
         )
 
 
@@ -574,6 +592,56 @@ def _extract_patch_from_stdout(stdout: str) -> str:
     marker = "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
     if marker in stdout:
         return stdout.split(marker, 1)[1].strip()
+    return ""
+
+
+def _read_agent_exit_status(task_dir: Path) -> str | None:
+    """Return mini-SWE-agent's terminal exit_status for this task.
+
+    The agent writes ``miniswe_run/exit_statuses_*.yaml`` whose
+    ``instances_by_exit_status`` maps a status name (``Submitted`` on success,
+    ``Uncaught <Exception>`` / ``LimitsExceeded`` / ... on failure) to the
+    instances that ended that way. A single-task run carries one status. This
+    status is the only place a startup crash surfaces — the wrapper process
+    still exits 0 — so without lifting it here the proposer only ever sees an
+    empty patch and a 0 score, and has to guess the cause. Parsed line-by-line
+    to avoid a YAML dependency; returns None if the file is missing/unreadable.
+    """
+
+    try:
+        candidates = sorted((task_dir / "miniswe_run").glob("exit_statuses_*.yaml"))
+    except OSError:
+        return None
+    if not candidates:
+        return None
+    try:
+        lines = candidates[-1].read_text(encoding="utf-8", errors="ignore").splitlines()
+    except OSError:
+        return None
+    in_block = False
+    for line in lines:
+        if line.startswith("instances_by_exit_status:"):
+            in_block = True
+            continue
+        if in_block:
+            # A status key is indented and ends with ':'; instance ids start '- '.
+            stripped = line.strip()
+            if stripped and not stripped.startswith("- ") and stripped.endswith(":"):
+                return stripped[:-1].strip()
+    return None
+
+
+def _read_stdout_tail(task_dir: Path, *, max_chars: int = 1500) -> str:
+    """Tail of the agent's stdout (the traceback lives here), '' if absent."""
+
+    for name in ("miniswe_stdout.txt", "stdout.txt"):
+        path = task_dir / name
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        if text.strip():
+            return text[-max_chars:]
     return ""
 
 

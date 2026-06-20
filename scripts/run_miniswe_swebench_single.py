@@ -16,9 +16,18 @@ import sys
 from pathlib import Path
 
 
-DEFAULT_MODEL = "openai/Qwen3.5-35B-A3B-FP8"
-DEFAULT_BASE_URL = "http://127.0.0.1:8000/v1"
-DEFAULT_MODEL_CLASS = "qwen35_miniswe_model.Qwen35TextModel"
+# Defaults target DeepSeek's OpenAI-compatible API; every launcher overrides
+# --model / --base-url, so these only matter when the runner is invoked bare.
+DEFAULT_MODEL = "openai/deepseek-v4-flash"
+DEFAULT_BASE_URL = "https://api.deepseek.com/v1"
+# mini-SWE-agent's built-in text-based LiteLLM class. It routes through LiteLLM
+# to the OpenAI-compatible endpoint from --base-url and parses backtick actions,
+# matching swebench_backticks.yaml. The previous default
+# (``qwen35_miniswe_model.Qwen35TextModel``) was a stale MemoMemo/vLLM-era
+# reference to a module that no longer exists in the seed source, so
+# get_model_class() crashed at startup and every candidate scored 0/30 until the
+# proposer hand-aliased it. See the registry in minisweagent/models/__init__.py.
+DEFAULT_MODEL_CLASS = "litellm_textbased"
 
 # Hard ceiling for the agent step limit. The runner no longer forces a fixed
 # step limit: the scaffold's own swebench_backticks.yaml value is honored (so
@@ -35,6 +44,16 @@ def main() -> int:
     parser.add_argument("--task-dir", required=True, type=Path)
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
+    parser.add_argument(
+        "--model-class",
+        default=DEFAULT_MODEL_CLASS,
+        help=(
+            "mini-SWE-agent model class key (see the registry in "
+            "minisweagent/models/__init__.py). Default "
+            f"'{DEFAULT_MODEL_CLASS}' routes through LiteLLM to the --base-url "
+            "endpoint with text-based (backtick) action parsing."
+        ),
+    )
     parser.add_argument("--api-key", default=None)
     parser.add_argument(
         "--api-key-env",
@@ -118,7 +137,7 @@ def run_agent(args: argparse.Namespace, *, root: Path, instance_id: str) -> int:
         "--model",
         args.model,
         "--model-class",
-        DEFAULT_MODEL_CLASS,
+        args.model_class,
         "--config",
         "swebench_backticks.yaml",
         "--config",
