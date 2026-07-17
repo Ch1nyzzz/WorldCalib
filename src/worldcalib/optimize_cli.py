@@ -732,6 +732,13 @@ def main(argv: list[str] | None = None) -> int:
                 agentbench_train_size=args.agentbench_train_size,
                 agentbench_test_size=args.agentbench_test_size,
                 agentbench_temperature=args.agentbench_temperature,
+                # The runner samples the SUT off deepseek_model/deepseek_base_url,
+                # NOT the shared model/base_url — so --model/--base-url were
+                # silently ignored for agentbench (only --api-key took effect,
+                # which mismatched a non-deepseek key against api.deepseek.com and
+                # 401'd). Map them through so the SUT endpoint/model/key agree.
+                deepseek_model=args.model,
+                deepseek_base_url=args.base_url,
             )
         )
     elif args.task == "tau2":
