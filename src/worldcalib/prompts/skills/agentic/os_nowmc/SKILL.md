@@ -14,4 +14,3 @@ the candidate (real AgentBench OS episodes) after this session exits.
 
 <!-- INCLUDE: agentic/_base_core.md -->
 
-<!-- INCLUDE: agentic/_os_tail.md -->

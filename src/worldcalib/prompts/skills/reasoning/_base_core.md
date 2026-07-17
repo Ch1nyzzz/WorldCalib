@@ -60,8 +60,7 @@ the choice is yours:
 
 1. **Analyze.** Read evidence (traces, score_breakdown — see *Evidence
    interface* below), deep-read failed *and* solved tasks. Classify recurring
-   failure modes (see the task-specific hints below). This is the most important
-   step.
+   failure modes. This is the most important step.
 2. **Hypothesize.** State one falsifiable hypothesis: a general solver mechanism
    tied to a failure mode you classified.
 3. **Design & implement** exactly one mechanism-level change in the editable

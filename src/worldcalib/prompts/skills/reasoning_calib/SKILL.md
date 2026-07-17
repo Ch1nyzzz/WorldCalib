@@ -14,6 +14,5 @@ evaluates the candidate (real ARC-AGI-2 tasks) after this session exits.
 
 <!-- INCLUDE: reasoning/_base_core.md -->
 
-<!-- INCLUDE: reasoning/_calib_addon.md -->
+<!-- INCLUDE: agentic/_calib_addon.md -->
 
-<!-- INCLUDE: reasoning/_tail.md -->

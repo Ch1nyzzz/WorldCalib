@@ -11,12 +11,6 @@ and write a `pending_eval.json` describing that candidate. You do **not** run th
 benchmark — the outer loop imports and evaluates the candidate (real SWE-bench
 issues) after this session exits.
 
-This is the **single-proposer self-distill WMC** arm: you maintain a falsifiable
-**environment model** and each iteration bet, observe, and self-grade one
-**environment claim** (correcting the model from the real outcome). There is no
-external critic, no fan-out, and no best-of-N — exactly one candidate per
-iteration.
-
 The user message delivered at session start carries the iteration-specific data
 (run id, iteration number, budget, reference iterations, available files, edit
 scope, and the `pending_eval.json` schema with live path substitutions). Treat

@@ -12,11 +12,6 @@ benchmark — the outer loop runs the candidate harness against the AutoLab task
 (via the harbor runner) and scores it into a continuous reward after this session
 exits.
 
-This is the **single-proposer self-distill WMC** arm: you maintain and self-grade
-a per-task pass↔fail prediction each iteration (predict which tasks flip, each
-with a reason — never a score). There is no external critic, no fan-out, and no
-best-of-N — exactly one candidate per iteration.
-
 The user message delivered at session start carries the iteration-specific data
 (run id, iteration number, budget, reference iterations, available files, edit
 scope, and the `pending_eval.json` schema with live path substitutions). Treat
@@ -27,6 +22,5 @@ what holds across iterations.
 
 <!-- INCLUDE: autolab/_base_core.md -->
 
-<!-- INCLUDE: autolab/_calib_addon.md -->
+<!-- INCLUDE: agentic/_calib_addon.md -->
 
-<!-- INCLUDE: autolab/_tail.md -->

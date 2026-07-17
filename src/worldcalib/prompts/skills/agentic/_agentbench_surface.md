@@ -1,6 +1,6 @@
 ---
 name: worldcalib-proposer-agentbench-surface
-description: AgentBench-specific evolving surface for the agentic proposer — the agentrl BaseClient query strategy, editable seed_passthrough/base paths, and pending_eval conventions (kind="agent", scaffold_name="agent_passthrough"). Spliced ahead of the shared calib core.
+description: AgentBench-specific evolving surface for the agentic proposer — the agentrl BaseClient query strategy, the editable seed_passthrough/base paths, the message/tool object contract (locked model; exceptions zero the run), and pending_eval conventions (kind="agent", scaffold_name="agent_passthrough"). No failure-mode taxonomy and no mechanism suggestions: the proposer analyses all the feedback and patches the scaffold itself. Spliced ahead of the shared calib core.
 ---
 
 ## What you are evolving
@@ -21,14 +21,6 @@ from the edited snapshot. The editable surface:
   `self.inner` is the bound deepseek client (call `await self.inner.query(
   messages, tools=..., cache_key=...)`); `self.config` is the `ScaffoldConfig`;
   one fresh instance runs per episode, so per-episode state on `self` is safe.
-
-Things you can do in `query` (non-exhaustive — invent what the failure modes
-call for): reshape / compress / rewrite the message history before the model
-sees it; augment `tools` (embed environment constraints into descriptions);
-repair or validate the model's `tool_calls` before they are returned; add
-reflection / retry / self-consistency; detect repetition / loops / stalls across
-turns and steer; maintain cross-turn state. **Do not assume any fixed layer
-structure** — choose the mechanism that targets a real failure mode.
 
 ## Message & tool object contract — READ THIS BEFORE TOUCHING messages/tools
 
@@ -75,12 +67,11 @@ new_tool = OpenAIChatCompletionFunctionDefinition(
 
 `query` must return `list[MessageRecord]`. The default body
 `return await self.inner.query(messages, tools=tools, cache_key=cache_key)` works
-because it forwards the opaque records untouched. To add strategy, prepend/append
-your freshly-built `*MessageRecord` objects to the original `messages` list (keep
-the originals as-is — only convert when you need to *read* them), then forward to
-`self.inner.query(...)`. Never return bare dicts and never reconstruct an existing
-record from its converted dict (let the originals pass through). One fresh
-instance runs per episode, so counters / state on `self` are safe.
+because it forwards the opaque records untouched. When you build new
+`*MessageRecord` objects, keep the originals as-is (only convert when you need to
+*read* them). Never return bare dicts and never reconstruct an existing record
+from its converted dict (let the originals pass through). One fresh instance runs
+per episode, so counters / state on `self` are safe.
 
 ## pending_eval.json conventions
 
@@ -91,6 +82,5 @@ The exact output path and schema are in the iteration message. Independent of th
 - Point `extra.source_project_path` at the edited snapshot project source when
   you modify `project_source/src/worldcalib/agentic/backends/agentbench/...`.
 - `top_k` must be a single integer (unused by the agent; set to 1).
-- The `hypothesis` field must state: expected passrate direction, the failure
-  family targeted, at least two independent evidence sources, and one
-  counterexample class the change was designed not to hurt.
+- The `hypothesis` field must state: the change you made, the expected passrate
+  direction, and the evidence it came from.
