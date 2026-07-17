@@ -20,6 +20,31 @@ from worldcalib.schemas import CandidateResult, TaskResult
 DEFAULT_MINI_SWE_AGENT_SOURCE_PATH = Path("references/vendor/mini-swe-agent")
 DEFAULT_MINI_SWE_AGENT_NAME = "mini_swe_agent_source"
 
+# Small RAW per-task dump files the optimizer stages into the iter bundle so the
+# proposer reads the agent log + the test verdict directly (see
+# Optimizer._stage_task_dump_evidence). The agent (mini-swe) and the official
+# evaluator each write their own files; the swebench.py-captured stdout/eval
+# files are often empty (the subprocess logs to its own), so we declare BOTH
+# naming families — the stager skips whichever are absent. Heavy artifacts
+# (miniswe_run/, eval_report/) are deliberately excluded.
+#
+# ``test_output.txt`` is THE test verdict — the per-test log the SWE-bench
+# harness writes, captured into the task dir by run_miniswe_swebench_single.
+# ``official_eval_stdout.txt`` is only the run's tally ("resolved: 0"); for a
+# patch that applied cleanly and failed the hidden tests it names neither the
+# failing test nor the assertion, which is the whole question. Keep it first:
+# on a Submitted-but-failed task it is the only file that answers "why".
+_SWEBENCH_DUMP_EVIDENCE_FILES = [
+    "test_output.txt",
+    "miniswe_stdout.txt",
+    "official_eval_stdout.txt",
+    "official_eval_stderr.txt",
+    "stdout.txt",
+    "stderr.txt",
+    "eval_stdout.txt",
+    "eval_stderr.txt",
+]
+
 # Eval gate entry script. The trusted copy lives in the repo root; the same
 # filename inside a candidate snapshot is a read-only reference and must never
 # be invoked. The list covers every shape we have observed in launcher
@@ -328,6 +353,8 @@ class MiniSweAgentSourceRunner:
                     "base_commit": instance.base_commit,
                     "patch_path": str(patch_path),
                     "task_dir": str(task_dir),
+                    "task_dump": str(task_dir),
+                    "dump_evidence_files": list(_SWEBENCH_DUMP_EVIDENCE_FILES),
                     "returncode": None,
                     "evaluator_returncode": None,
                     "duration_s": time.time() - started,
@@ -383,6 +410,8 @@ class MiniSweAgentSourceRunner:
             "base_commit": instance.base_commit,
             "patch_path": str(patch_path),
             "task_dir": str(task_dir),
+            "task_dump": str(task_dir),
+            "dump_evidence_files": list(_SWEBENCH_DUMP_EVIDENCE_FILES),
             "returncode": completed.returncode,
             "evaluator_returncode": evaluator_returncode,
             "duration_s": duration_s,
@@ -393,11 +422,20 @@ class MiniSweAgentSourceRunner:
             # frame-audit does not have to open every raw patch file.
             "patch_bytes": len(patch_text.strip()),
         }
-        # When the agent self-destructed (an uncaught exception, or any non-
-        # Submitted terminal state that produced no patch), attach the stdout
-        # tail so the proposer sees the actual traceback instead of guessing.
+        # Attach the tail of whatever explains THIS failure. The two failure
+        # shapes are disjoint and used to be handled asymmetrically: only the
+        # self-destruct branch existed, so the one class of failure that carried
+        # evidence was the harness's own bugs — and the proposer, given evidence
+        # for nothing else, spent its budget diagnosing the harness.
         if exit_status and exit_status != "Submitted" and not exit_status.startswith("Submit"):
+            # Self-destruct: the traceback is in the agent's stdout.
             tail = _read_stdout_tail(task_dir)
+            if tail:
+                metadata["error_tail"] = tail
+        elif not passed:
+            # Patch applied, agent submitted, hidden tests failed — the majority
+            # of stable failures. The verdict is the test log's tail.
+            tail = _read_test_output_tail(task_dir)
             if tail:
                 metadata["error_tail"] = tail
         return CodingAgentRun(
@@ -643,6 +681,22 @@ def _read_stdout_tail(task_dir: Path, *, max_chars: int = 1500) -> str:
         if text.strip():
             return text[-max_chars:]
     return ""
+
+
+def _read_test_output_tail(task_dir: Path, *, max_chars: int = 3000) -> str:
+    """Tail of the harness's test log — which test failed, and how. '' if absent.
+
+    pytest's short summary (``FAILED <test> - <assertion>``) and the counts line
+    close the log, so the tail is the decisive part. The full file is staged
+    alongside for the proposer to read when the tail is not enough.
+    """
+
+    path = task_dir / "test_output.txt"
+    try:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return ""
+    return text[-max_chars:] if text.strip() else ""
 
 
 def _run_subprocess_with_timeout(
