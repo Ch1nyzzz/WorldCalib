@@ -29,11 +29,47 @@ from pathlib import Path
 from typing import Any
 
 from worldcalib.autolab.autolab import (
+    DEFAULT_HARBOR_BINARY,
+    DEFAULT_HARBOR_PYTHON,
+    DEFAULT_REWARD_GATE,
     AutolabAttempt,
     AutolabHarborRunner,
     AutolabTask,
 )
+from worldcalib.pareto import ParetoPoint, save_frontier
 from worldcalib.schemas import TaskResult
+from worldcalib.tb2.data import DEFAULT_TB2_DATASET, load_tb2_tasks
+
+DEFAULT_TB2_AGENT = "terminus-2"
+DEFAULT_TB2_SCAFFOLD_NAME = "terminus2_tb2"
+# The frozen SUT, pinned to what putty's configs run as their frozen solver on
+# the shared GPUGeek account. Deliberately NOT AutoLab's default: AutoLab runs
+# deepseek-v4-pro[1m], and a stronger SUT would confound anything measured here
+# with "a better model solves more".
+#
+# The ``openai/`` prefix is required and is not decoration. terminus-2 hands the
+# name to LiteLLM, which infers the provider from it; ``Vendor3/DeepSeek-V4-Flash``
+# is not a name LiteLLM knows, so without the prefix every trial dies at the first
+# call with "LLM Provider NOT provided" (observed). AutoLab's default needs no
+# prefix only because deepseek-v4-pro is a name LiteLLM already resolves. putty
+# stores the bare name and prefixes it in code (terminalbench.py: f"openai/{model}");
+# spider2 must NOT have the prefix, because it drives the OpenAI SDK directly
+# rather than LiteLLM. Same model, three clients, three spellings.
+DEFAULT_TB2_MODEL = "openai/Vendor3/DeepSeek-V4-Flash"
+DEFAULT_TB2_API_BASE = "https://api.gpugeek.com/v1"
+# terminus-2 reads this as an agent kwarg and hands it to LiteLLM; the matching
+# key must reach the trial as OPENAI_API_KEY (the launcher exports it).
+TB2_API_BASE_KWARG = "api_base"
+# tb2 gets its own vendored copy so a candidate's edits here never reach the
+# AutoLab experiments (both are gitignored under references/).
+DEFAULT_TB2_TERMINUS2_SOURCE = Path("references/vendor/terminus2_agent_tb2")
+# Terminal-Bench's published methodology: pass@1 x 2 repeats, MEAN-aggregated.
+DEFAULT_TB2_REPEATS = 2
+# Each concurrent trial takes its own Docker compose network and the host's
+# default address pool holds ~31 in total, shared with everything else running.
+# putty measured 16 exhausting the pool ("all predefined address pools have been
+# fully subnetted") and failing 19 of 20 tasks. Leave real headroom.
+DEFAULT_TB2_CONCURRENCY = 8
 
 # A terminus rollout runs a few dozen turns; the sample trial inspected held 29
 # steps / ~22KB, so most fit whole. Truncation keeps the TAIL: a terminal task is
@@ -106,6 +142,36 @@ def read_test_summary(trial_dir: Path) -> dict[str, Any]:
     return summary if isinstance(summary, dict) else {}
 
 
+def render_crash(trial_dir: Path) -> str:
+    """The trial's own traceback, when the agent died before the verifier ran.
+
+    Harbor writes ``exception.txt`` and leaves ``verifier/`` empty, so a crashed
+    trial has no test log by construction — its evidence lives here instead. Both
+    failure classes must carry evidence or the only diagnosable failures become
+    the ones that happen to take the branch that was wired.
+    """
+
+    path = Path(trial_dir) / "exception.txt"
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    if not text.strip():
+        return ""
+    return text[-_MAX_TEST_OUTPUT_CHARS:]
+
+
+def render_trial_log_tail(trial_dir: Path, *, max_chars: int = 2000) -> str:
+    """Tail of Harbor's own trial log — the error message behind a traceback."""
+
+    path = Path(trial_dir) / "trial.log"
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    return text[-max_chars:] if text.strip() else ""
+
+
 def render_final_pane(trial_dir: Path) -> str:
     """The terminal as the agent left it — the state the verifier then judged."""
 
@@ -129,6 +195,9 @@ class Tb2HarborRunner(AutolabHarborRunner):
         "verifier/ctrf.json",
         "agent/trajectory.json",
         "agent/terminus_2.pane",
+        # Present only when the agent died before the verifier ran, which is
+        # exactly when the verifier files are absent.
+        "exception.txt",
         "trial.log",
     )
 
@@ -177,9 +246,21 @@ class Tb2HarborRunner(AutolabHarborRunner):
         summary = read_test_summary(trial_dir)
         if summary:
             metadata["test_summary"] = summary
+        # Two disjoint failure classes, both evidenced. The verifier's log exists
+        # only when the verifier ran; a trial that crashed first has an
+        # exception.txt and an empty verifier/ instead. Wiring one and not the
+        # other is how a harness ends up able to explain only the failures it
+        # happened to branch for.
         test_output = render_test_output(trial_dir)
+        crash = render_crash(trial_dir)
         if test_output:
             metadata["error_tail"] = test_output
+        elif crash:
+            metadata["error_tail"] = crash
+            metadata["crashed"] = True
+            log_tail = render_trial_log_tail(trial_dir)
+            if log_tail:
+                metadata["trial_log_tail"] = log_tail
         pane = render_final_pane(trial_dir)
         if pane:
             metadata["final_pane"] = pane
@@ -224,3 +305,114 @@ class Tb2HarborRunner(AutolabHarborRunner):
         if len(text) <= max_chars:
             return text
         return text[:max_chars] + "\n... (truncated)"
+
+
+# ---------------------------------------------------------------------------
+# Frontier (seed-baseline eval).
+# ---------------------------------------------------------------------------
+def run_tb2_frontier(
+    *,
+    out_dir: Path,
+    tasks_path: Path | None = None,
+    split: str = "train",
+    limit: int = 0,
+    task_ids: tuple[str, ...] = (),
+    harbor_binary: Path = DEFAULT_HARBOR_BINARY,
+    harbor_python: Path = DEFAULT_HARBOR_PYTHON,
+    harbor_agent: str = DEFAULT_TB2_AGENT,
+    harbor_model: str = DEFAULT_TB2_MODEL,
+    api_base: str = DEFAULT_TB2_API_BASE,
+    n_attempts: int = DEFAULT_TB2_REPEATS,
+    timeout_multiplier: float = 1.0,
+    concurrency: int = DEFAULT_TB2_CONCURRENCY,
+    max_turns: int = 0,
+    max_task_seconds: int = 0,
+    env_file: Path | None = None,
+    reward_gate: float = DEFAULT_REWARD_GATE,
+    eval_timeout_s: int = 300,
+    max_eval_workers: int = 1,
+    dry_run: bool = False,
+    force: bool = False,
+    verify_patches: bool = True,
+    pareto_quality_threshold: float = 0.125,
+) -> dict[str, Any]:
+    """Evaluate the pristine terminus-2 baseline (no agent-kwarg edits).
+
+    Writes ``run_summary.json``, which is what a later run's ``SEED_FROM`` reads
+    to share this iter-0 byte-identically across both arms.
+    """
+
+    tasks = load_tb2_tasks(
+        tasks_path or DEFAULT_TB2_DATASET,
+        split=split,
+        limit=limit,
+        task_ids=task_ids or (),
+    )
+    out_dir.mkdir(parents=True, exist_ok=True)
+    candidate: dict[str, Any] = {
+        "name": DEFAULT_TB2_SCAFFOLD_NAME,
+        "scaffold_name": DEFAULT_TB2_SCAFFOLD_NAME,
+        "agent_name": DEFAULT_TB2_SCAFFOLD_NAME,
+        "model": harbor_model,
+        "agent_kwargs": {TB2_API_BASE_KWARG: api_base},
+        "agent_env": {},
+    }
+    runner = Tb2HarborRunner(
+        tasks=tasks,
+        out_dir=out_dir,
+        harbor_binary=harbor_binary,
+        harbor_python=harbor_python,
+        harbor_agent=harbor_agent,
+        harbor_model=harbor_model,
+        n_attempts=n_attempts,
+        timeout_multiplier=timeout_multiplier,
+        concurrency=concurrency,
+        max_turns=max_turns,
+        max_task_seconds=max_task_seconds,
+        env_file=env_file,
+        reward_gate=reward_gate,
+        eval_timeout_s=eval_timeout_s,
+        max_eval_workers=max_eval_workers,
+        dry_run=dry_run,
+        force=force,
+        verify_patches=verify_patches,
+    )
+    result = runner.evaluate_candidate(
+        candidate=candidate,
+        candidate_id=DEFAULT_TB2_SCAFFOLD_NAME,
+        agent_name=DEFAULT_TB2_SCAFFOLD_NAME,
+    )
+    frontier_path = out_dir / "pareto_frontier.json"
+    save_frontier(
+        frontier_path,
+        [
+            ParetoPoint(
+                candidate_id=result.candidate_id,
+                scaffold_name=result.scaffold_name,
+                passrate=result.passrate,
+                token_consuming=result.token_consuming,
+                avg_token_consuming=result.avg_token_consuming,
+                average_score=result.average_score,
+                result_path=result.result_path,
+                config=result.config,
+            )
+        ],
+        quality_gap_threshold=pareto_quality_threshold,
+    )
+    summary = {
+        "benchmark": "tb2",
+        "target_system": DEFAULT_TB2_SCAFFOLD_NAME,
+        "split": split,
+        "limit": limit,
+        "count": len(tasks),
+        "dry_run": dry_run,
+        "force": force,
+        "candidate_count": 1,
+        "candidates": [result.to_dict()],
+        "pareto_frontier_path": str(frontier_path),
+    }
+    (out_dir / "run_summary.json").write_text(
+        json.dumps(summary, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return summary
