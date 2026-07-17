@@ -161,6 +161,34 @@ access policy, dump list, or proposer skill text:
       a 408-byte tally that said `resolved: 0`. The proposer obeyed the instruction and
       found an empty box; its diagnosis then read `maybe … might … Need know`.
 
+## A/B protocol: both arms start from a byte-identical iter0
+
+Never let the two arms compute their own iter-0. Build the seed **once**, then run
+both arms from it (`ITERATIONS=0 launch_<bench>.sh nowmc` → `SEED_FROM=runs/<seed>`
+for each arm). Otherwise the arms diverge at step 0 from sampling noise alone, and
+that noise is inside every gap you go on to measure — on a 31-task split one flipped
+task is ±0.03, which is the size of the effects being claimed.
+
+**Verify the sharing actually happened; do not assume it.** The mechanism is
+silently broken in at least one backend (autolab's shared-iter0 hook needs a
+`run_summary.json` the optimizer never writes, so the arms quietly seed themselves).
+A silent fallback to independent seeds looks exactly like a successful share. One
+command settles it:
+
+```sh
+md5sum runs/<seed>/candidate_results/iter000*.json \
+       runs/<arm_a>/candidate_results/iter000*.json \
+       runs/<arm_b>/candidate_results/iter000*.json   # three identical hashes, or stop
+```
+
+Same rule for anything else meant to be held constant across arms — the SUT model
+and endpoint especially. When you re-point a SUT at a different endpoint, check the
+seed passrate against the previous run's before reading anything into the arms: an
+unchanged seed score is the evidence that the swap did not move the SUT. And never
+change the SUT in the same run as a harness change — "the proposer can now see" and
+"a stronger model solves more" are then indistinguishable, which is the confound
+this whole skill is about, wearing a different hat.
+
 ## The tell
 
 **A diagnosis written in hedges — "maybe", "likely", "could be", "Need know" — is
