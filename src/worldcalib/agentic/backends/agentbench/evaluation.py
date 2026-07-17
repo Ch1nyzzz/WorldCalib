@@ -37,6 +37,83 @@ from worldcalib.schemas import CandidateResult, LocomoExample, TaskResult
 DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEFAULT_DEEPSEEK_MODEL = "deepseek-chat"
 
+# Head-truncate / tail-keep budget for the rendered rollout (same policy as
+# tau2's render_transcript): a webshop product listing is long, but the
+# episode's outcome — what the agent finally bought and its reward — is at the
+# tail, so we keep the tail. The task instruction lives at the head and is
+# extracted separately into `question`, so head-truncation does not lose it.
+_MAX_TRANSCRIPT_CHARS = 12000
+
+
+def _flatten_content(content: Any) -> str:
+    """OpenAI chat ``content`` is either a string or a list of typed parts."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for part in content:
+            if isinstance(part, dict):
+                if part.get("type") == "text" and part.get("text"):
+                    parts.append(str(part["text"]))
+                elif part.get("type") == "image_url":
+                    parts.append("<image>")
+            elif part:
+                parts.append(str(part))
+        return "\n".join(parts)
+    return str(content)
+
+
+def _extract_instruction(raw_trace: Any) -> str:
+    """The task the episode was asked to do.
+
+    AgentBench examples are index-only (``question=""``); the real task text is
+    served at runtime as the first *user* observation (webshop: ``WebShop [SEP]
+    Instruction: [SEP] <task> [SEP] Search``; os: the problem statement). Return
+    it verbatim so the proposer diagnoses the actual task, not ``webshop#3``.
+    """
+    for msg in raw_trace or []:
+        if isinstance(msg, dict) and msg.get("role") == "user":
+            text = _flatten_content(msg.get("content")).strip()
+            if text:
+                return text
+    return ""
+
+
+def _render_transcript(raw_trace: Any) -> str:
+    """The episode's full rollout — the candidate's actual behavior.
+
+    ``reward=0.0`` says the episode failed; only the transcript says whether the
+    agent searched the wrong keywords, clicked the wrong product, or bought one
+    that missed a required attribute. Tool calls (search/click) are rendered
+    inline because that is where webshop/os episodes actually go wrong.
+    """
+    lines: list[str] = []
+    for msg in raw_trace or []:
+        if not isinstance(msg, dict):
+            continue
+        role = str(msg.get("role", "?"))
+        text = _flatten_content(msg.get("content"))
+        if text:
+            lines.append(f"[{role}] {text}")
+        # Reasoning-model transcripts (the served deepseek-v4-flash emits one)
+        # carry the agent's chain-of-thought here; it is where a wrong click is
+        # actually reasoned out, so it is diagnostic evidence, not chatter.
+        reasoning = msg.get("reasoning_content")
+        if reasoning:
+            lines.append(f"[{role} thinking] {reasoning}")
+        for call in msg.get("tool_calls") or []:
+            fn = call.get("function") if isinstance(call, dict) else None
+            fn = fn or {}
+            lines.append(f"[{role} tool_call] {fn.get('name', '?')}({fn.get('arguments', '')})")
+    if not lines:
+        return "(no messages)"
+    text = "\n".join(lines)
+    if len(text) <= _MAX_TRANSCRIPT_CHARS:
+        return text
+    return "... (head truncated, tail kept) ...\n" + text[-_MAX_TRANSCRIPT_CHARS:]
+
 
 class AgentEvaluationRunner:
     """Evaluate an ``AgentScaffold`` over a task's train/test split of episodes."""
@@ -51,6 +128,7 @@ class AgentEvaluationRunner:
         model: str = DEFAULT_DEEPSEEK_MODEL,
         base_url: str = DEFAULT_DEEPSEEK_BASE_URL,
         api_key: str = "",
+        temperature: float = 0.0,
         runs: int = 1,
         concurrency: int = 8,
         pass_threshold: float = 1.0,
@@ -64,6 +142,7 @@ class AgentEvaluationRunner:
         self.model = model
         self.base_url = base_url
         self.api_key = api_key
+        self.temperature = temperature
         self.runs = max(1, runs)
         self.concurrency = max(1, concurrency)
         self.pass_threshold = pass_threshold
@@ -76,6 +155,10 @@ class AgentEvaluationRunner:
             model=self.model,
             api_key=SecretStr(self.api_key) if self.api_key else None,
             base_url=self.base_url,
+            # agentrl defaults to 0.8; pin it (0.0 by default) so episode
+            # outcomes are as deterministic as the serving stack allows and
+            # iter-to-iter per-task flips reflect the candidate, not sampling.
+            temperature=self.temperature,
             thinking=False,
             chat_completions=True,
             parallel_tool_calls=False,
@@ -166,11 +249,27 @@ class AgentEvaluationRunner:
             category = result.result.get("type")
         question_type = str(category or example.metadata.get("question_type") or "all")
 
+        # The rollout: the served task text (instruction), the full action
+        # trace, and the episode's outcome. Previously the record kept only
+        # `status` — a tally that could not distinguish a wrong-product buy from
+        # a search that never converged, so a failed episode read as uncaused.
+        raw_trace = getattr(result, "raw_trace", None)
+        instruction = _extract_instruction(raw_trace)
+        transcript = _render_transcript(raw_trace)
+        transcript = f"{transcript}\n\n[episode end] status={result.status} reward={reward}"
+
         return TaskResult(
             task_id=example.task_id,
-            question=example.task_id,
+            # index-only examples carry no question; recover the served task text
+            # from the rollout, falling back to task_id only if the trace is empty.
+            question=instruction or example.task_id,
+            # WebShop scores a continuous attribute match, not a single gold
+            # string: the required attributes are stated in the instruction
+            # (now in `question`) and the server's reward/attribute breakdown,
+            # when present, rides in metadata (server_result / task_trace). We do
+            # not fabricate a gold answer the benchmark does not define.
             gold_answer="",
-            prediction=str(result.status),
+            prediction=transcript,
             score=score,
             passed=passed,
             prompt_tokens=0,
@@ -181,5 +280,10 @@ class AgentEvaluationRunner:
                 "status": str(result.status),
                 "index": example.metadata["index"],
                 "reward": reward,
+                # Server-side outcome carried verbatim (faithful translator, not
+                # diagnostician): result may hold the task-type / target attrs;
+                # task_trace holds the reward breakdown when the worker emits one.
+                "server_result": result.result,
+                "task_trace": getattr(result, "task_trace", None),
             },
         )
