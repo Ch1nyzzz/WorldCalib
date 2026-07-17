@@ -18,21 +18,16 @@ relays a short verdict, never a diagnosed cause). Under
 `reference_iterations/iter_NNN/dumps/<candidate>/<task>/` — and, for the iter you
 built on, `base_eval/dumps/<candidate>/<task>/`:
 
-- **`test_output.txt` — the test log itself: which test failed and how.** This is
-  the file that answers "the patch applied and the tests still failed — why?".
-  Read it FIRST on any such task. Its tail (the `FAILED <test> - <assertion>`
-  lines and the counts) is also mirrored into the outcome record's `error_tail`.
-- `miniswe_stdout.txt` — the agent's run log / traceback. This is what explains a
-  **self-destruct** (no patch, a non-`Submitted` exit status).
-- `official_eval_stdout.txt` / `official_eval_stderr.txt` — the run's **tally**
-  ("resolved: 0"), not a verdict. It tells you THAT a task failed, never why.
+- `test_output.txt` — the test log the SWE-bench harness wrote for that task: the
+  per-test results and pytest's closing summary. Its tail is also mirrored onto the
+  outcome record's `error_tail`.
+- `miniswe_stdout.txt` — the agent's run log, including any traceback.
+- `official_eval_stdout.txt` / `official_eval_stderr.txt` — the evaluation run's
+  counts (`resolved: N`).
 
-A failure whose cause is "not legible in the scores" is the normal case, not the
-exception: a clean patch that fails hidden tests looks identical, in the scores,
-to a genuine model-capability ceiling. Do not infer a cause from the patch text
-alone — open `test_output.txt` and the agent source that produced the behavior.
-If the evidence for a claim is not in front of you, say the evidence is missing;
-never promote a guess about the cause into a hypothesis.
+The agent source that produced the behavior is in your snapshot; it is all
+white-box. If the evidence for a claim is not in front of you, say the evidence is
+missing rather than promoting a guess into a hypothesis.
 
 The runtime candidate is the source-backed scaffold `mini_swe_agent_source`,
 loaded from the edited snapshot named in `extra.source_project_path`. The

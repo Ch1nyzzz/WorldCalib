@@ -37,23 +37,13 @@ file. It must return `{"sql", "prompt_tokens", "completion_tokens", "error"}`.
 ## Evidence you can read while designing
 
 - **The databases are mounted read-only at `/spider2_db/<db>.sqlite`.** Query them
-  yourself, now, with `sqlite3` — the gold result CSVs are NOT mounted, so nothing
-  there is an answer. Use this to **check the assumptions your policy encodes**
-  rather than guessing them. The DDL names columns; only the data tells you a
-  column's real value vocabulary, its cardinality, or that a category you modelled
-  as two-valued has three. A threshold, a `LIKE` pattern, or an `ELSE` branch you
-  cannot justify against actual values is a guess — run the query and find out.
-- **`result_preview` on each task's outcome record is what the candidate's own SQL
-  returned** (row count + a capped head). `grade_error: "Result Error"` says only
-  THAT the rows were wrong; `result_preview` shows how. A group with `0` rows or a
-  `NULL` aggregate means a filter matched nothing — visible in the rows, invisible
-  in the SQL text.
-- **`gold_answer` is the table the query was graded against** (all accepted variants,
-  which also shows you the column-subset matching in action). **Read it against
-  `result_preview` — neither is legible alone.** A group holding 2796 rows looks
-  entirely reasonable by itself and is obviously wrong next to a gold whose matching
-  group holds 1. Gold tells you WHAT was expected, never HOW: closing the gap still
-  means querying `/spider2_db` to find out *why* those rows do not belong.
+  yourself, with `sqlite3`. The gold result CSVs are not mounted, so nothing there
+  is an answer. The DDL names a column; it does not tell you what is in it.
+- **`result_preview` on each task's outcome record is what that candidate's own SQL
+  returned** — row count plus a capped head of the rows. `grade_error` reports only
+  THAT grading failed.
+- **`gold_answer` is the result table the query was graded against**, including every
+  accepted variant. Read it alongside `result_preview`; neither is legible alone.
 - **Never let gold cross into the policy.** Reading it to diagnose is the point;
   writing it — or anything derived per-instance from it — into the scaffold is
   reward-hacking and is rejected. Rules you infer must hold for tasks you have never

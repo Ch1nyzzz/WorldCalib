@@ -189,6 +189,41 @@ change the SUT in the same run as a harness change — "the proposer can now see
 "a stronger model solves more" are then indistinguishable, which is the confound
 this whole skill is about, wearing a different hat.
 
+## The other direction: too much evidence *text* manufactures fake success
+
+Restoring evidence means **announcing the channel, never the content**. A task skill
+describes the workflow — where the artifacts are, what each one contains, what the
+output contract is. It must not carry a failure-mode taxonomy, a mechanism
+suggestion, a prior ("this is the normal case"), a reading order ("open X first"),
+or any number from a real task. The proposer is what finds those. That is the
+measurement.
+
+This is not hypothetical; it was done here, in the same day as the fixes above.
+Wiring spider2's evidence, the skill acquired lines like:
+
+> ~~"only the data tells you ... that a category you modelled **as two-valued has three**"~~
+> ~~"a group holding **2796** rows ... next to a gold whose matching group holds **1**"~~
+> ~~"an **`ELSE` branch** you cannot justify against actual values is a guess"~~
+
+Every one of those is the root cause of `local015` — the exact task pre-registered
+as the experiment's prediction — written into the instructions. It then flipped on
+iteration 3, and the flip was **worthless as evidence**: the proposer had been told
+the answer. The spider2 skill's own frontmatter had said *"No failure-mode taxonomy
+and no mechanism suggestions"* the whole time. The rule already existed; the person
+adding the evidence broke it.
+
+So the two failures are mirror images, and both make you measure your own plumbing:
+
+| | Symptom |
+|---|---|
+| Too little evidence | Fake **reasoning errors** — real failures that look uncaused |
+| Too much evidence *text* | Fake **successes** — flips that measure your hint, not the harness |
+
+Before landing a skill edit, grep your own diff for: a number from a real task, a
+named failure mode, "usually / normally / most", "first", and any sentence that
+states what is *wrong* rather than what *exists*. Announce the tap; do not describe
+the water.
+
 ## The tell
 
 **A diagnosis written in hedges — "maybe", "likely", "could be", "Need know" — is
