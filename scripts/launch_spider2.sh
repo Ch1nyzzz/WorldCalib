@@ -7,9 +7,10 @@
 # Spider2 runs from the MAIN venv: the agent is a single-shot text-to-SQL policy
 # whose only deps are openai/pandas (pandas via the vendored evaluation_suite,
 # plus google-cloud-bigquery which the suite imports at module top even for the
-# local sqlite path). The target SUT is deepseek-v4-flash over api.deepseek.com
-# (DEEPSEEK_API_KEY from env), wired via MODEL_NAME — there is no
-# --model/--base-url/--api-key (those are unused by the Spider2 backend). The
+# local sqlite path). The target SUT is DeepSeek-V4-Flash on the shared GPUGeek
+# solver account (Solver_API_KEY), wired via MODEL_NAME / DEEPSEEK_BASE_URL /
+# DEEPSEEK_API_KEY — there is no --model/--base-url/--api-key (those are unused
+# by the Spider2 backend). The
 # proposer is kimi via docker-claude-kimi, identical to the other launchers.
 #
 # Shared iter-0 seed: SEED_FROM clones a precomputed iter-0 run dir into this
@@ -37,7 +38,7 @@ if [ -f .env ]; then
   set +a
 fi
 
-for v in KIMI_API_KEY DEEPSEEK_API_KEY; do
+for v in KIMI_API_KEY Solver_API_KEY; do
   if [ -z "${!v:-}" ]; then
     printf 'fatal: %s is not set.\n' "$v" >&2
     exit 2
@@ -47,8 +48,18 @@ done
 # Main venv python (must have worldcalib + openai + pandas + google-cloud-bigquery).
 SPIDER2_PY="${SPIDER2_PY:-python}"
 
-# The SUT is locked to deepseek-v4-flash via MODEL_NAME (spider2/llm.py reads it).
-export MODEL_NAME="${MODEL_NAME:-deepseek-v4-flash}"
+# The frozen SUT runs on the shared GPUGeek solver account (Solver_API_KEY) —
+# the same endpoint/model the putty configs pin as their frozen solver. It stays
+# DeepSeek-V4-**Flash**: the .env SOLVER_MODEL names V4-Pro, and swapping the SUT
+# would confound the one thing the re-run measures (whether the proposer's new
+# evidence moves the stable failures) with "a stronger model solves more".
+#
+# spider2/llm.py drives the OpenAI SDK directly off DEEPSEEK_BASE_URL /
+# DEEPSEEK_API_KEY / MODEL_NAME, so point those at the solver. Note the model id
+# takes NO "openai/" prefix here (that is a LiteLLM-ism and would 404).
+export DEEPSEEK_BASE_URL="${DEEPSEEK_BASE_URL:-${SOLVER_BASE_URL:-https://api.gpugeek.com/v1}}"
+export DEEPSEEK_API_KEY="${Solver_API_KEY}"
+export MODEL_NAME="${MODEL_NAME:-Vendor3/DeepSeek-V4-Flash}"
 
 if [[ "$KIMI_API_KEY" == sk-kimi-* ]]; then
   KIMI_BASE_URL="${KIMI_BASE_URL:-https://api.kimi.com/coding}"
