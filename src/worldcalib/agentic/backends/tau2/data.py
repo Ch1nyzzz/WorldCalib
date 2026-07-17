@@ -57,6 +57,36 @@ def task_question_type(task: object) -> str:
     return "+".join(labels) if labels else "all"
 
 
+def render_task_question(task: object) -> str:
+    """The episode's brief: purpose, the user's scenario/instructions, the ticket.
+
+    Without this the record carried only the task id, so a proposer asked to explain
+    ``reward=0.0`` could not see what the agent was supposed to accomplish.
+    """
+
+    parts: list[str] = []
+    for label, attr in (("Description", "description"), ("Scenario", "user_scenario")):
+        value = getattr(task, attr, None)
+        if value:
+            parts.append(f"== {label} ==\n{value}")
+    ticket = getattr(task, "ticket", None)
+    if ticket:
+        parts.append(f"== Ticket ==\n{ticket}")
+    return "\n\n".join(parts)
+
+
+def render_evaluation_criteria(task: object) -> str:
+    """What the episode is graded against — the actions/assertions reward comes from.
+
+    This is gold, and it belongs on the record the proposer reads: it is the only
+    way to tell "the agent solved a different problem" from "the agent solved the
+    right problem badly". It is never handed to the scaffold.
+    """
+
+    criteria = getattr(task, "evaluation_criteria", None)
+    return str(criteria) if criteria else ""
+
+
 def _make_example(domain: str, task: object, split: str) -> LocomoExample:
     metadata: dict[str, object] = {
         "domain": domain,
@@ -67,8 +97,8 @@ def _make_example(domain: str, task: object, split: str) -> LocomoExample:
     return LocomoExample(
         task_id=f"{domain}#{task.id}",
         sample_id=f"{domain}#{task.id}",
-        question="",
-        answer="",
+        question=render_task_question(task),
+        answer=render_evaluation_criteria(task),
         category=0,
         evidence=(),
         conversation=(),

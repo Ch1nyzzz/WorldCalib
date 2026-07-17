@@ -268,11 +268,50 @@ def eval_patch(args: argparse.Namespace, *, root: Path, instance_id: str) -> int
     )
     (args.task_dir / "official_eval_stdout.txt").write_text(completed.stdout, encoding="utf-8")
     (args.task_dir / "official_eval_stderr.txt").write_text(completed.stderr, encoding="utf-8")
+    _capture_test_output(root, args.task_dir, report_id=report_id, instance_id=instance_id)
     report = _find_report(root, args.task_dir, report_id)
     if report is None:
         return 1
     payload = json.loads(report.read_text(encoding="utf-8"))
     return 0 if int(payload.get("resolved_instances") or 0) == 1 else 1
+
+
+# Cap the copy so the optimizer's dump stager (which SKIPS files over its own
+# size limit) never silently drops the verdict. The pytest short summary and the
+# FAILED/ERROR lines live at the END of the log, so a tail keeps the decisive
+# part; the median log is ~26KB and survives whole.
+_TEST_OUTPUT_MAX_BYTES = 256 * 1024
+
+
+def _capture_test_output(
+    root: Path, task_dir: Path, *, report_id: str, instance_id: str
+) -> None:
+    """Copy the harness's own per-test log into the task dump.
+
+    ``swebench.harness.run_evaluation`` writes the real test log to
+    ``<cwd>/logs/run_evaluation/<report_id>/<model>/<instance_id>/test_output.txt``
+    — outside ``--report_dir``, and outside the task dir the proposer can read.
+    Without this the only surviving evidence is the run's *tally* ("resolved: 0"),
+    which says THAT the patch failed and never WHICH test failed or how.
+    Best-effort: evaluation must not break because a log is missing.
+    """
+
+    base = root / "logs" / "run_evaluation" / report_id
+    try:
+        found = sorted(base.glob(f"*/{instance_id}/test_output.txt"))
+    except OSError:
+        return
+    if not found:
+        return
+    src = max(found, key=lambda p: p.stat().st_mtime)
+    try:
+        data = src.read_bytes()
+        truncated = len(data) > _TEST_OUTPUT_MAX_BYTES
+        if truncated:
+            data = b"[... head truncated, tail kept ...]\n" + data[-_TEST_OUTPUT_MAX_BYTES:]
+        (task_dir / "test_output.txt").write_bytes(data)
+    except OSError:
+        return
 
 
 def _find_report(root: Path, task_dir: Path, report_id: str) -> Path | None:
