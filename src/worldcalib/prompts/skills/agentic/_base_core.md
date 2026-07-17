@@ -12,7 +12,7 @@ outcome resolutions are available in each candidate's
 `candidate_results/<id>.json`: the per-task-type `score_breakdown` (when the
 dataset defines task-types), and the per-episode `tasks[]` rows (each carries a
 `task_id` + `score`/`passed`). Use whichever the evidence makes most legible to
-classify failure modes (see the task-specific tail below).
+classify the failure modes you observe.
 
 ## Generalization comes first — do not overfit the scored split
 
@@ -60,14 +60,14 @@ the choice is yours:
 ## Workflow
 
 1. **Analyze.** Read evidence (traces, score_breakdown — see *Evidence
-   interface* below), deep-read failed *and* successful episodes. Classify
-   recurring failure modes (see the task-specific hints below). This is the most
+   interface* below), deep-read failed *and* successful episodes. Classify the
+   recurring failure modes you observe in the evidence. This is the most
    important step.
 2. **Hypothesize.** State one falsifiable hypothesis: a general policy mechanism
    tied to a failure mode you classified.
 3. **Design & implement** exactly one mechanism-level change in the editable
-   snapshot (the `seed_passthrough.py` named in the surface above). One candidate
-   tests one hypothesis.
+   snapshot (the file(s) named in the surface above). One candidate tests one
+   hypothesis.
 4. **Smoke check.** Run a lightweight syntax/import check on the edited snapshot.
 5. **Write `pending_eval.json`** with exactly one candidate (see the conventions
    in the surface above).
@@ -79,6 +79,21 @@ Inspect the raw evidence directly: the `reference_iterations/iter_NNN/` bundles
 failure mode and the change, and `candidate_results/<id>.json` carries the
 outcome record — the per-task-type `score_breakdown` and the per-episode
 `tasks[]` rows (each with `task_id` + `score`/`passed`) — to learn from.
+
+When the backend stages raw per-task dump files (the benchmark's own verdict +
+the runtime log), they sit under
+`reference_iterations/iter_NNN/dumps/<candidate>/<task>/` and — for the iter you
+built on — under `base_eval/`. The outcome record only relays the benchmark's
+short verdict; it does NOT pre-diagnose the cause. When a failure's cause is not
+legible in the scores or that short verdict, READ THESE RAW FILES (and, when
+needed, the harness source that produced the behavior) directly — they are the
+ground truth, not a pre-digested summary.
+
+When the eval runs each task more than once (multi-run eval), `tasks[]` has one
+row **per run** of each `task_id`. A task that passes in some runs and fails in
+others is **UNSTABLE** — its outcome is noise, not an effect of any change.
+Never build a hypothesis on an unstable task's flip, and never count it as a
+win or a regression; judge mechanisms only on tasks whose runs agree.
 
 ## Hard rules (read before editing)
 
@@ -102,7 +117,7 @@ unfamiliar episodes** of the same task.
 
 ## Edit scope
 
-Work inside the copied source snapshot. The editable policy is the
-`seed_passthrough.py` named in the surface above (and the backend `base.py` if a
-mechanism genuinely needs a shared helper). Do not modify the outer optimizer,
-evaluator, data loaders, or run artifacts.
+Work inside the copied source snapshot. The editable policy is the file(s) named
+in the surface above (plus a shared backend helper only if a mechanism genuinely
+needs one). Do not modify the outer optimizer, evaluator, data loaders, or run
+artifacts.

@@ -14,7 +14,7 @@ filtering, reranking, and context budgeting are valid when they are expected to
 improve answer quality by removing noise or surfacing stronger evidence. The
 per-`question_type` `score_breakdown` and the per-episode `tasks[]` rows (each
 with a `task_id` + `score`/`passed`) in `candidate_results/<id>.json` are both
-available to classify failure modes (see the benchmark-specific tail below).
+available to classify failure modes.
 
 ## Generalization comes first — do not overfit the scored split
 

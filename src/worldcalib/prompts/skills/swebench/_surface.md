@@ -13,6 +13,22 @@ checkout, edits source, and produces a patch, scored by whether the repo's
 `passrate` — the fraction of issues resolved. The frozen solver LLM underneath
 is the fixed SUT; you evolve the agent wrapped around it.
 
+Per-task raw evidence is staged for you to read directly (the outcome record only
+relays a short verdict, never a diagnosed cause). Under
+`reference_iterations/iter_NNN/dumps/<candidate>/<task>/` — and, for the iter you
+built on, `base_eval/dumps/<candidate>/<task>/`:
+
+- `test_output.txt` — the test log the SWE-bench harness wrote for that task: the
+  per-test results and pytest's closing summary. Its tail is also mirrored onto the
+  outcome record's `error_tail`.
+- `miniswe_stdout.txt` — the agent's run log, including any traceback.
+- `official_eval_stdout.txt` / `official_eval_stderr.txt` — the evaluation run's
+  counts (`resolved: N`).
+
+The agent source that produced the behavior is in your snapshot; it is all
+white-box. If the evidence for a claim is not in front of you, say the evidence is
+missing rather than promoting a guess into a hypothesis.
+
 The runtime candidate is the source-backed scaffold `mini_swe_agent_source`,
 loaded from the edited snapshot named in `extra.source_project_path`. The
 editable surface is the copied mini-SWE-agent source tree under

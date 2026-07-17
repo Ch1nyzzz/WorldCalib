@@ -44,6 +44,63 @@ from worldcalib.schemas import CandidateResult, LocomoExample, TaskResult
 DEFAULT_ARC_MAX_TOKENS = 2048
 DEFAULT_ARC_MAX_ATTEMPTS = 2
 
+# Grading-side renderers (deliberately NOT in arc_scaffolds/, which a candidate may
+# edit). A 30x30 grid (ARC's max) renders to ~930 chars and a task holds up to ~15
+# grids, so the cap must clear ~14KB: a truncated puzzle is a puzzle the proposer
+# cannot solve, which is the failure this whole module exists to stop.
+_MAX_RENDER_CHARS = 20000
+
+
+def render_grid(grid: Grid | None) -> str:
+    """One grid as ``<rows>x<cols>`` plus a digit-per-cell block."""
+
+    if not grid:
+        return "(none)"
+    rows = ["".join(str(cell) for cell in row) for row in grid]
+    return f"{len(grid)}x{len(grid[0]) if grid[0] else 0}\n" + "\n".join(rows)
+
+
+def render_grids(grids: list[Grid]) -> str:
+    """Several grids, indexed by test input."""
+
+    if not grids:
+        return "(none)"
+    parts = [f"[test {i}]\n{render_grid(g)}" for i, g in enumerate(grids)]
+    return _cap("\n".join(parts))
+
+
+def render_attempts(attempts: list[list[Grid]]) -> str:
+    """The candidate's ordered candidate grids per test input."""
+
+    if not attempts:
+        return "(no attempts — parsing produced nothing)"
+    parts: list[str] = []
+    for i, per_test in enumerate(attempts):
+        if not per_test:
+            parts.append(f"[test {i}] (no parsable grid)")
+            continue
+        for j, grid in enumerate(per_test):
+            parts.append(f"[test {i} attempt {j}]\n{render_grid(grid)}")
+    return _cap("\n".join(parts))
+
+
+def render_arc_task(train: list[dict], test_inputs: list[Grid]) -> str:
+    """The puzzle: the train input->output pairs plus the test input(s)."""
+
+    parts: list[str] = []
+    for i, pair in enumerate(train):
+        parts.append(f"[train {i} input]\n{render_grid(pair.get('input'))}")
+        parts.append(f"[train {i} output]\n{render_grid(pair.get('output'))}")
+    for i, grid in enumerate(test_inputs):
+        parts.append(f"[test {i} input]\n{render_grid(grid)}")
+    return _cap("\n".join(parts))
+
+
+def _cap(text: str) -> str:
+    if len(text) <= _MAX_RENDER_CHARS:
+        return text
+    return text[:_MAX_RENDER_CHARS] + "\n... (truncated)"
+
 
 class ArcEvaluationRunner:
     """Evaluate an ``ArcScaffold`` over a split of ARC-AGI-2 tasks."""
@@ -160,9 +217,16 @@ class ArcEvaluationRunner:
             passed = score >= 1.0
             return TaskResult(
                 task_id=example.task_id,
-                question=example.task_id,
-                gold_answer="",
-                prediction=f"solved={solved_count}/{num_test}",
+                # The puzzle IS the question: without the train pairs and the test
+                # input, a diagnosis of "solved=0/1" has nothing to reason about.
+                question=render_arc_task(train, test_inputs),
+                # Gold stays out of the SCAFFOLD (see above) but belongs in the
+                # record the PROPOSER reads: comparing the predicted grid against
+                # the intended one is what separates "misread the rule" from
+                # "right rule, botched the render".
+                gold_answer=render_grids(gold_outputs),
+                # The candidate's actual output, not a tally of it.
+                prediction=render_attempts(result.attempts),
                 score=score,
                 passed=passed,
                 prompt_tokens=int(result.prompt_tokens),

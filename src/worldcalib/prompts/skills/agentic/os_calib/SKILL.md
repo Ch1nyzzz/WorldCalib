@@ -16,4 +16,3 @@ the candidate (real AgentBench OS episodes) after this session exits.
 
 <!-- INCLUDE: agentic/_calib_addon.md -->
 
-<!-- INCLUDE: agentic/_os_tail.md -->

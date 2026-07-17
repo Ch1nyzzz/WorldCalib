@@ -52,7 +52,7 @@ def build_error_task_result(
     metadata.update(extra_metadata)
     return TaskResult(
         task_id=example.task_id,
-        question=example.task_id,
+        question=example.question,
         gold_answer="",
         prediction="error",
         score=0.0,

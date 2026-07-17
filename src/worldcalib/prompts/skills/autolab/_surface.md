@@ -1,6 +1,6 @@
 ---
 name: worldcalib-proposer-autolab-surface
-description: AutoLab-specific evolving surface for the agent-harness proposer — you design a harbor BaseAgent (the terminus_2 snapshot is a reference you may keep, modify, or replace wholesale; only the BaseAgent interface is fixed), the harbor_contract read-only interface mirror, the source-backed snapshot you point pending_eval.json at, and the autolab pending_eval conventions (exactly one candidate, extra.source_project_path, hypothesis fields). Spliced ahead of the shared base core; shared by both the autolab_calib and autolab_nowmc arms.
+description: AutoLab-specific evolving surface for the agent-harness proposer — what the editable terminus-2 snapshot contains (a harbor BaseAgent you may keep, modify, or replace wholesale; only the BaseAgent interface is fixed), the harbor_contract read-only interface mirror, the only hard constraints (solver LOCKED; solution/tests/task.toml/verifier OFF-LIMITS), and the pending_eval output contract. No failure-mode taxonomy and no mechanism suggestions: the proposer analyses all the feedback and designs the agent itself. Spliced ahead of the shared base core; shared by both the autolab_calib and autolab_nowmc arms.
 ---
 
 ## What you are evolving
@@ -34,20 +34,15 @@ call the solver model. The real interface definitions are mirrored READ-ONLY at
 them, and the reference `terminus_2.py`, before designing.
 
 **Everything inside the agent is yours to design, and we prescribe NO design.**
-The whole loop is open: how the model is prompted; how many model calls and how
-they are budgeted; how command output is rendered, truncated, or fed back; what
-state (if any) is carried forward across steps or repeated attempts; whether and
-how the agent verifies, re-measures, retries, backs off, or keeps a best version;
-and when it finalizes. A from-scratch redesign and a small targeted edit are
-EQUALLY valid candidates — pick whatever the traces justify. Do not default to
-"edit the prompt"; the prompt is one lever among many, and the highest-leverage
-change is often in the agent's control flow / mechanism, not its wording.
-`pending_eval.json` `agent_kwargs` (e.g. `parser_name` json|xml, `max_turns`,
-`temperature`) reach the constructor and are available as supporting knobs.
+You may edit any file under the package **and add new files/modules** — the whole
+package propagates to the eval run, so new modules are importable. A from-scratch
+redesign and a small targeted edit are equally valid candidates. There is no
+prescribed lever or failure mode; read the reference `terminus_2.py`, the
+`harbor_contract`, and the feedback, and decide. `pending_eval.json` `agent_kwargs`
+(e.g. `parser_name` json|xml, `max_turns`, `temperature`) reach the constructor
+and are available as supporting knobs.
 
 You do **not** write per-task solutions and you do **not** touch any task's files.
-**Do not assume any fixed agent structure** — target a real failure mode you
-observed in the traces.
 
 ## Hard environment boundaries (the harness must respect these)
 
@@ -73,8 +68,6 @@ iteration message. Independent of those:
   (the parent of the edited `terminus_2/`), as named in `SNAPSHOT_AUTOLAB.md`.
 - If you create a wrapper module under the generated directory, keep it small and
   route harness mechanisms through the clean edited snapshot.
-- The `hypothesis` field must state: the observed failure mode being targeted,
-  which specific tasks it should flip `fail→pass` (named per `task_id`, not a
-  score-delta) and the cost impact, why the change should transfer beyond the
-  scored tasks, and one currently-passing task it could regress (and why it
-  won't).
+- `hypothesis`: the change you made, which specific tasks it should flip
+  `fail→pass` (named per `task_id`, not a score-delta), and the evidence it came
+  from.

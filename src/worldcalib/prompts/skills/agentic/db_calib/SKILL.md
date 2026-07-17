@@ -16,4 +16,3 @@ the candidate (real AgentBench DB episodes) after this session exits.
 
 <!-- INCLUDE: agentic/_calib_addon.md -->
 
-<!-- INCLUDE: agentic/_db_tail.md -->

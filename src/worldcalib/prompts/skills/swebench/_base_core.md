@@ -36,9 +36,9 @@ never the model.
 - **Do not swap or wrap the model.** Do not change `model_class`, do not add a
   custom `Model` subclass, do not register a new entry in
   `_MODEL_CLASS_MAPPING`. The default LiteLLM model class already routes to the
-  served target; replacing it is off-task and a frequent self-destruct (an
-  unregistered/incomplete model class makes the agent crash at startup with an
-  empty patch before the first call).
+  served target; replacing it is off-task (an unregistered or incomplete model
+  class makes the agent crash at startup with an empty patch before the first
+  call).
 - **It is not a vLLM-served model.** The DeepSeek API does **not** honor
   vLLM/Qwen chat-template knobs such as `chat_template_kwargs.enable_thinking`,
   and `deepseek-v4-flash` does **not** emit `<think>...</think>` blocks — any

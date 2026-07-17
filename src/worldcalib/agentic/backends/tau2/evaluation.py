@@ -65,6 +65,41 @@ def _sum_tokens(simulation: Any) -> tuple[int, int]:
     return prompt, completion
 
 
+# A telecom episode runs to a few dozen messages; capping at ~24KB keeps a whole
+# conversation on the record in the normal case. The tail matters more than the head
+# (a task is lost at the end), so keep the tail when a run overruns.
+_MAX_TRANSCRIPT_CHARS = 24000
+
+
+def render_transcript(simulation: Any) -> str:
+    """The episode's actual conversation — the candidate's rollout.
+
+    ``reward=0.0`` says the episode failed; only the transcript says whether the
+    agent asked the wrong question, called the wrong tool, or got a tool error and
+    gave up. Tool calls and tool errors are rendered inline because those are where
+    tau2 episodes actually die.
+    """
+
+    lines: list[str] = []
+    for msg in getattr(simulation, "messages", None) or []:
+        role = str(getattr(msg, "role", "?"))
+        content = getattr(msg, "content", None)
+        if content:
+            lines.append(f"[{role}] {content}")
+        for call in getattr(msg, "tool_calls", None) or []:
+            name = getattr(call, "name", "?")
+            args = getattr(call, "arguments", None)
+            lines.append(f"[{role} tool_call] {name}({args})")
+        if getattr(msg, "error", None):
+            lines.append(f"[{role} TOOL_ERROR] {getattr(msg, 'error')}")
+    if not lines:
+        return "(no messages)"
+    text = "\n".join(lines)
+    if len(text) <= _MAX_TRANSCRIPT_CHARS:
+        return text
+    return "... (head truncated, tail kept) ...\n" + text[-_MAX_TRANSCRIPT_CHARS:]
+
+
 class Tau2EvaluationRunner:
     """Evaluate a ``Tau2Scaffold`` over a domain's train/test split of episodes."""
 
@@ -193,9 +228,10 @@ class Tau2EvaluationRunner:
 
         return TaskResult(
             task_id=example.task_id,
-            question=example.task_id,
-            gold_answer="",
-            prediction=f"reward={score}",
+            question=example.question,
+            gold_answer=example.answer,
+            # The conversation itself, not a restatement of the score.
+            prediction=render_transcript(simulation),
             score=score,
             passed=passed,
             prompt_tokens=prompt_tokens,
@@ -206,6 +242,11 @@ class Tau2EvaluationRunner:
                 "status": "completed",
                 "reward": reward,
                 "reward_breakdown": breakdown,
+                # Why the episode stopped — ran out of steps vs the user hanging up
+                # vs the agent finishing are different failures with the same reward.
+                "termination_reason": str(
+                    getattr(simulation, "termination_reason", "") or ""
+                ),
                 "num_messages": len(getattr(simulation, "messages", None) or []),
                 "domain": self.domain,
             },
