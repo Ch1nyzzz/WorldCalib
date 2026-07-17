@@ -1,6 +1,6 @@
 ---
 name: worldcalib-proposer-memory-surface
-description: Memory-specific evolving surface for the memory proposer — the MemoryScaffold build()/answer() editable source surface and pending_eval conventions (source-backed memgpt scaffold). Spliced ahead of the shared base core; shared by both the calib and nowmc arms.
+description: Memory-specific evolving surface for the memory proposer — what the editable source surface contains (MemoryScaffold build()/answer() and the shared runtime helpers), and the pending_eval output contract (source-backed memgpt scaffold, build_tag for persisted-memory changes). No failure-mode taxonomy and no mechanism suggestions: the proposer analyses all the feedback and patches the scaffold itself. Spliced ahead of the shared base core; shared by both the calib and nowmc arms.
 ---
 
 ## What you are evolving
@@ -41,9 +41,5 @@ iteration message. Independent of those:
   edit changes build/database-construction or other persisted
   memory-construction semantics, use a new stable `build_tag` and any required
   fresh source-base routing.
-- The `hypothesis` field must state: expected `passrate` / `average_score`
-  direction, expected token-context impact, and why the mechanism should
-  transfer beyond the current train split.
-- The `hypothesis` or `changes` field must also include: the failure family
-  being targeted, at least two independent evidence sources supporting it, and
-  one counterexample class the patch was designed not to hurt.
+- `hypothesis`: the change you made, the expected `passrate` / `average_score`
+  direction, and the evidence it came from.

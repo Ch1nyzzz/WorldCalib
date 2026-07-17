@@ -21,4 +21,3 @@ this skill describes what holds across iterations.
 
 <!-- INCLUDE: memory/_base_core.md -->
 
-<!-- INCLUDE: memory/_locomo_tail.md -->

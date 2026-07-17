@@ -15,4 +15,3 @@ exits.
 
 <!-- INCLUDE: agentic/_base_core.md -->
 
-<!-- INCLUDE: agentic/_alfworld_tail.md -->

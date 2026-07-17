@@ -93,22 +93,39 @@ def _seed_calibration(out_dir: Path, prev_calibration: Path | None) -> None:
 _BOOTSTRAP_CALIBRATION = """\
 # World Model Calibration
 
-Append-only. The proposer must read this file before reasoning about the next
-candidate, distill any mismatch from the previous iter, then append a new
-`## iter_NNN distill` section. Never rewrite or delete prior entries.
+Goal: a falsifiable MODEL OF THE ENVIRONMENT (how the SUT behaves as an agent,
+how the tools/eval/tasks behave) — a patch is an experiment that tests and
+exploits it. Passrate is the downstream consequence; the model is the object you
+maintain. Each iteration is one experiment: predict → observe → correct.
 
-## Observability
+This file has two regions, split at the first `## iter_` heading:
+- **HEAD (mutable, rewritten in place each iter)** — the live model below.
+- **HISTORY (append-only, from the first `## iter_` on)** — one distill block per
+  iter; never edit or delete a prior block. The harness keeps HISTORY from shrinking.
 
-Each iter produces:
-- a per-task answer score (passrate)
-- per-task token consumption (prompt + completion)
-- traces under `iter_NNN/workspace/traces/`
-- failure type distribution recoverable from those traces
+Each iter: rewrite the HEAD to current state, then append one distill block. Keep
+it lean — prefer 5 high-confidence beliefs over 20 vague ones. Start the Beliefs
+list EMPTY and fill it only from this run's evidence; never pre-seed guessed
+failure modes.
 
-There is no hidden / shadow score and no judge that observes generalization.
-Train passrate is therefore the only outcome dimension the proposer can predict
-against. Do NOT write unfalsifiable generalization judgements into this file —
-keep entries to outcome predictions and concrete mismatch observations.
+## Beliefs
+Falsifiable facts (rewrite in place; bootstrap them from the seed traces at iter 1):
+`[E<n>] <claim> | conf:<0-1> | status:<hypothesis|confirmed|refuted> | evidence:<trace ids / tool-call outputs> | mass:~<N>`
+
+## Experiments
+What has been tried against each belief, so a spent direction is never re-run:
+`- <belief E<n>>: <experiment> → <held|flat|harmful>`
+
+## Calibration
+How well recent predictions held (the meta-signal for the next experiment):
+- prediction hit-rate: behavioral 0/0, aggregate 0/0
+- state: no beliefs yet — first experiments buy information
+
+## iter_000 -> iter_001 distill (bootstrap)
+- Experiment: bootstrap
+- note: seed Beliefs from the seed traces at iter 1 (as `hypothesis`); read
+  behavioral evidence from trace turns / tool-call outputs, stable-vs-unstable
+  from `task_score_matrix.json`.
 """
 
 
@@ -252,6 +269,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--agentbench", dest="task", action="store_const", const="agentbench"
     )
     target.add_argument("--tau2", dest="task", action="store_const", const="tau2")
+    target.add_argument("--gaia", dest="task", action="store_const", const="gaia")
     target.add_argument(
         "--arc-agi2", dest="task", action="store_const", const="arc_agi2"
     )
@@ -260,6 +278,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     target.add_argument(
         "--autolab", dest="task", action="store_const", const="autolab"
+    )
+    target.add_argument("--tb2", dest="task", action="store_const", const="tb2")
+    target.add_argument(
+        "--spider2", dest="task", action="store_const", const="spider2"
+    )
+    target.add_argument(
+        "--toolathlon", dest="task", action="store_const", const="toolathlon"
+    )
+    target.add_argument(
+        "--appworld", dest="task", action="store_const", const="appworld"
     )
 
     _add_common_optimize_args(parser)
@@ -291,6 +319,8 @@ def build_parser() -> argparse.ArgumentParser:
     # at a small episode count. db has task-types; raise this if running db wide.
     parser.add_argument("--agentbench-train-size", type=int, default=30)
     parser.add_argument("--agentbench-test-size", type=int, default=40)
+    # Target-model sampling temperature (agentrl's own default is 0.8 — noisy).
+    parser.add_argument("--agentbench-temperature", type=float, default=0.0)
 
     parser.add_argument(
         "--tau2-domain",
@@ -310,6 +340,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tau2-request-timeout-s", type=int, default=120)
     parser.add_argument("--tau2-num-retries", type=int, default=2)
 
+    # GAIA (L1+L2 by default; exact-match graded; FC agent over deepseek SUT)
+    parser.add_argument(
+        "--gaia-levels",
+        default="1,2",
+        help="CSV of GAIA difficulty levels to include (default 1,2).",
+    )
+    parser.add_argument("--gaia-runs", type=int, default=1)
+    parser.add_argument("--gaia-concurrency", type=int, default=8)
+    parser.add_argument("--gaia-train-size", type=int, default=40)
+    parser.add_argument("--gaia-test-size", type=int, default=0)
+
     parser.add_argument(
         "--arc-data-dir", default="/data/home/yuhan/ARC-AGI-2/data"
     )
@@ -320,6 +361,36 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--arc-runs", type=int, default=1)
     parser.add_argument("--arc-concurrency", type=int, default=8)
 
+    # Spider2-lite local (sqlite) subset; execution-graded single-shot text-to-SQL
+    # over the deepseek SUT. Frozen db-disjoint split data/spider2/lite_local_split.json
+    # owns the train/test instance ids (31 train / 104 test).
+    parser.add_argument("--spider2-runs", type=int, default=1)
+    parser.add_argument("--spider2-concurrency", type=int, default=8)
+
+    # Toolathlon: containerized multi-app tool-use benchmark, end-state graded via
+    # the benchmark's own run_parallel.py. Frozen app-disjoint split
+    # data/toolathlon/finalpool_split.json owns the train/test ids (28 train /
+    # 72 test; 8 cred/env-blocked tasks excluded). SUT locked to deepseek-v4-flash.
+    parser.add_argument("--toolathlon-concurrency", type=int, default=8)
+    parser.add_argument("--toolathlon-maxstep", type=int, default=50)
+    parser.add_argument("--toolathlon-per-task-timeout-s", type=int, default=1800)
+    parser.add_argument("--toolathlon-root", type=Path, default=None)
+    parser.add_argument("--toolathlon-force", action="store_true")
+
+    # AppWorld: external-runner interactive coding-agent benchmark, eval in the
+    # isolated .venv-appworld (subprocess-harvest). Frozen split
+    # data/appworld/split.json owns train (train[:50]) / test (test_normal, 168).
+    # SUT locked to deepseek-v4-flash.
+    parser.add_argument("--appworld-concurrency", type=int, default=64)
+    parser.add_argument("--appworld-max-interactions", type=int, default=100)
+    parser.add_argument("--appworld-per-task-timeout-s", type=int, default=600)
+    parser.add_argument(
+        "--appworld-repeats", type=int, default=1,
+        help="k-times averaging: evaluate each task k times and use the MEAN "
+             "pass-rate as the reward (shrinks deepseek temp-0 MoE eval noise ~sqrt(k)).",
+    )
+    parser.add_argument("--appworld-force", action="store_true")
+
     parser.add_argument("--swebench-data-path", type=Path, default=None)
     # Default None -> the swebench dispatch branch falls back to
     # SwebenchOptimizerConfig.mini_swe_agent_source_path so we avoid a
@@ -328,6 +399,61 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mini-swe-agent-command", default="")
     parser.add_argument("--mini-swe-agent-eval-command", default="")
     parser.add_argument("--swebench-force", action="store_true")
+
+    parser.add_argument(
+        "--tb2-dataset",
+        type=Path,
+        default=None,
+        help="Path to the Terminal-Bench 2.0 Harbor dataset dir (89 task dirs).",
+    )
+    parser.add_argument(
+        "--tb2-terminus2-source",
+        type=Path,
+        default=None,
+        help=(
+            "Editable terminus-2 source root the proposer snapshots and edits. "
+            "Default: references/vendor/terminus2_agent_tb2 — tb2's own copy, so "
+            "candidate edits never reach the AutoLab experiments."
+        ),
+    )
+    parser.add_argument("--tb2-harbor-python", type=Path, default=None)
+    parser.add_argument("--tb2-harbor-binary", type=Path, default=None)
+    parser.add_argument("--tb2-agent", default=None)
+    parser.add_argument(
+        "--tb2-harbor-model",
+        default=None,
+        help="Frozen SUT. Default: the GPUGeek-served DeepSeek-V4-Flash.",
+    )
+    parser.add_argument(
+        "--tb2-api-base",
+        default=None,
+        help="Solver endpoint handed to terminus-2 as the api_base agent kwarg.",
+    )
+    parser.add_argument(
+        "--tb2-repeats",
+        type=int,
+        default=None,
+        help=(
+            "Trials per task. Terminal-Bench's published metric is pass@1 averaged "
+            "over repeats with MEAN; the default is 2."
+        ),
+    )
+    parser.add_argument(
+        "--tb2-concurrency",
+        type=int,
+        default=None,
+        help=(
+            "Concurrent trials (default 8). Each takes its own Docker compose "
+            "network and the host pool holds ~31 in total; 16 has been measured "
+            "exhausting it and failing 19 of 20 tasks."
+        ),
+    )
+    parser.add_argument("--tb2-timeout-multiplier", type=float, default=None)
+    parser.add_argument("--tb2-max-turns", type=int, default=None)
+    parser.add_argument("--tb2-max-task-minutes", type=float, default=None)
+    parser.add_argument("--tb2-env-file", type=Path, default=None)
+    parser.add_argument("--tb2-task-ids", default="")
+    parser.add_argument("--tb2-force", action="store_true")
 
     parser.add_argument(
         "--autolab-tasks-path",
@@ -350,6 +476,26 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--autolab-harbor-model", default=None)
     parser.add_argument("--autolab-n-attempts", type=int, default=1)
     parser.add_argument("--autolab-timeout-multiplier", type=float, default=1.0)
+    parser.add_argument(
+        "--autolab-max-turns",
+        type=int,
+        default=0,
+        help=(
+            "Hard cap on the terminus-2 agent episode loop (injected as "
+            "--ak max_turns). 0 = no cap. Bounds a candidate whose finalization "
+            "gate keeps rejecting task_complete from looping indefinitely."
+        ),
+    )
+    parser.add_argument(
+        "--autolab-max-task-minutes",
+        type=float,
+        default=0.0,
+        help=(
+            "Absolute per-task agent wall-clock ceiling in minutes, applied "
+            "gracefully via harbor's --agent-timeout-multiplier. 0 = no cap. "
+            "Only tasks whose native agent timeout exceeds this are shortened."
+        ),
+    )
     parser.add_argument("--autolab-concurrency", type=int, default=4)
     parser.add_argument("--autolab-env-file", type=Path, default=None)
     parser.add_argument("--autolab-reward-gate", type=float, default=0.5)
@@ -465,6 +611,10 @@ def main(argv: list[str] | None = None) -> int:
         from worldcalib.agentic.backends.tau2 import DEFAULT_TAU2_SEED_SCAFFOLDS
 
         scaffolds_csv = list(DEFAULT_TAU2_SEED_SCAFFOLDS)
+    elif args.task == "gaia":
+        from worldcalib.agentic.backends.gaia import DEFAULT_GAIA_SEED_SCAFFOLDS
+
+        scaffolds_csv = list(DEFAULT_GAIA_SEED_SCAFFOLDS)
     elif args.task == "arc_agi2":
         from worldcalib.reasoning.arc_scaffolds import DEFAULT_ARC_SEED_SCAFFOLDS
 
@@ -477,6 +627,28 @@ def main(argv: list[str] | None = None) -> int:
         from worldcalib.autolab.autolab import DEFAULT_AUTOLAB_SCAFFOLD_NAME
 
         scaffolds_csv = [DEFAULT_AUTOLAB_SCAFFOLD_NAME]
+    elif args.task == "tb2":
+        from worldcalib.tb2.tb2 import DEFAULT_TB2_SCAFFOLD_NAME
+
+        scaffolds_csv = [DEFAULT_TB2_SCAFFOLD_NAME]
+    elif args.task == "spider2":
+        from worldcalib.agentic.backends.spider2 import (
+            DEFAULT_SPIDER2_SEED_SCAFFOLDS,
+        )
+
+        scaffolds_csv = list(DEFAULT_SPIDER2_SEED_SCAFFOLDS)
+    elif args.task == "toolathlon":
+        from worldcalib.agentic.backends.toolathlon import (
+            DEFAULT_TOOLATHLON_SEED_SCAFFOLDS,
+        )
+
+        scaffolds_csv = list(DEFAULT_TOOLATHLON_SEED_SCAFFOLDS)
+    elif args.task == "appworld":
+        from worldcalib.agentic.backends.appworld import (
+            DEFAULT_APPWORLD_SEED_SCAFFOLDS,
+        )
+
+        scaffolds_csv = list(DEFAULT_APPWORLD_SEED_SCAFFOLDS)
     else:
         scaffolds_csv = list(DEFAULT_EVOLUTION_SEED_SCAFFOLDS)
     scaffold_extra = _scaffold_extra(args.scaffold_extra_json)
@@ -559,6 +731,7 @@ def main(argv: list[str] | None = None) -> int:
                 agentbench_concurrency=args.agentbench_concurrency,
                 agentbench_train_size=args.agentbench_train_size,
                 agentbench_test_size=args.agentbench_test_size,
+                agentbench_temperature=args.agentbench_temperature,
             )
         )
     elif args.task == "tau2":
@@ -583,6 +756,25 @@ def main(argv: list[str] | None = None) -> int:
                 tau2_pass_threshold=args.tau2_pass_threshold,
                 tau2_request_timeout_s=args.tau2_request_timeout_s,
                 tau2_num_retries=args.tau2_num_retries,
+            )
+        )
+    elif args.task == "gaia":
+        from worldcalib.agentic.backends.gaia.optimizer import (
+            GaiaOptimizer,
+            GaiaOptimizerConfig,
+        )
+
+        gaia_levels = tuple(
+            int(x) for x in str(args.gaia_levels).split(",") if x.strip()
+        )
+        optimizer = GaiaOptimizer(
+            GaiaOptimizerConfig(
+                **shared,
+                gaia_levels=gaia_levels,
+                gaia_runs=args.gaia_runs,
+                gaia_concurrency=args.gaia_concurrency,
+                gaia_train_size=args.gaia_train_size,
+                gaia_test_size=args.gaia_test_size,
             )
         )
     elif args.task == "arc_agi2":
@@ -637,6 +829,8 @@ def main(argv: list[str] | None = None) -> int:
             harbor_n_attempts=args.autolab_n_attempts,
             harbor_timeout_multiplier=args.autolab_timeout_multiplier,
             harbor_concurrency=args.autolab_concurrency,
+            harbor_max_turns=args.autolab_max_turns,
+            harbor_max_task_seconds=int(args.autolab_max_task_minutes * 60),
             reward_gate=args.autolab_reward_gate,
             score_mode=args.autolab_score_mode,
             task_ids=tuple(_csv(args.autolab_task_ids)),
@@ -656,6 +850,82 @@ def main(argv: list[str] | None = None) -> int:
         if args.autolab_env_file is not None:
             autolab_kwargs["harbor_env_file"] = args.autolab_env_file
         optimizer = AutolabOptimizer(AutolabOptimizerConfig(**autolab_kwargs))
+    elif args.task == "tb2":
+        from worldcalib.tb2.tb2_optimizer import Tb2Optimizer, Tb2OptimizerConfig
+
+        # Every flag defaults to None so an omitted one falls through to
+        # Tb2OptimizerConfig's default rather than silently re-pinning the SUT,
+        # the repeats, or the MEAN aggregation to something else.
+        tb2_kwargs = dict(
+            **shared,
+            task_ids=tuple(_csv(args.tb2_task_ids)),
+            force=args.tb2_force,
+        )
+        for flag, key in (
+            ("tb2_dataset", "tasks_path"),
+            ("tb2_terminus2_source", "terminus2_source_path"),
+            ("tb2_harbor_python", "harbor_python"),
+            ("tb2_harbor_binary", "harbor_binary"),
+            ("tb2_agent", "harbor_agent"),
+            ("tb2_harbor_model", "harbor_model"),
+            ("tb2_api_base", "api_base"),
+            ("tb2_repeats", "harbor_n_attempts"),
+            ("tb2_concurrency", "harbor_concurrency"),
+            ("tb2_timeout_multiplier", "harbor_timeout_multiplier"),
+            ("tb2_max_turns", "harbor_max_turns"),
+            ("tb2_env_file", "harbor_env_file"),
+        ):
+            value = getattr(args, flag, None)
+            if value is not None:
+                tb2_kwargs[key] = value
+        if args.tb2_max_task_minutes is not None:
+            tb2_kwargs["harbor_max_task_seconds"] = int(args.tb2_max_task_minutes * 60)
+        optimizer = Tb2Optimizer(Tb2OptimizerConfig(**tb2_kwargs))
+    elif args.task == "spider2":
+        from worldcalib.agentic.backends.spider2.optimizer import (
+            Spider2Optimizer,
+            Spider2OptimizerConfig,
+        )
+
+        optimizer = Spider2Optimizer(
+            Spider2OptimizerConfig(
+                **shared,
+                spider2_runs=args.spider2_runs,
+                spider2_concurrency=args.spider2_concurrency,
+            )
+        )
+    elif args.task == "toolathlon":
+        from worldcalib.agentic.backends.toolathlon.optimizer import (
+            ToolathlonOptimizer,
+            ToolathlonOptimizerConfig,
+        )
+
+        toolathlon_kwargs = dict(
+            **shared,
+            toolathlon_concurrency=args.toolathlon_concurrency,
+            toolathlon_maxstep=args.toolathlon_maxstep,
+            toolathlon_per_task_timeout_s=args.toolathlon_per_task_timeout_s,
+            force=args.toolathlon_force,
+        )
+        if args.toolathlon_root is not None:
+            toolathlon_kwargs["toolathlon_root"] = args.toolathlon_root
+        optimizer = ToolathlonOptimizer(ToolathlonOptimizerConfig(**toolathlon_kwargs))
+    elif args.task == "appworld":
+        from worldcalib.agentic.backends.appworld.optimizer import (
+            AppWorldOptimizer,
+            AppWorldOptimizerConfig,
+        )
+
+        optimizer = AppWorldOptimizer(
+            AppWorldOptimizerConfig(
+                **shared,
+                appworld_concurrency=args.appworld_concurrency,
+                appworld_max_interactions=args.appworld_max_interactions,
+                appworld_per_task_timeout_s=args.appworld_per_task_timeout_s,
+                appworld_repeats=args.appworld_repeats,
+                force=args.appworld_force,
+            )
+        )
     else:
         optimizer = LocomoOptimizer(LocomoOptimizerConfig(**shared))
 

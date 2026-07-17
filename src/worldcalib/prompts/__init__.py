@@ -119,6 +119,11 @@ def benchmark_skill_name(*, benchmark_name: str, target_system: str) -> str:
     target = target_system.lower()
     if "autolab" in benchmark or "autolab" in target or "harbor" in target:
         return "autolab"
+    # Before the "terminus" arm below: Terminal-Bench 2 also runs a terminus-2
+    # agent, so both of that arm's conditions match it and would route tb2 to a
+    # skill key that has no directory.
+    if "terminal-bench 2" in benchmark or "tb2" in benchmark or "tb2" in target:
+        return "tb2"
     if "terminal-bench" in benchmark or "terminus" in target:
         return "terminus"
     if "swe-bench" in benchmark or "mini_swe" in target or "miniswe" in target:
@@ -140,6 +145,14 @@ def benchmark_skill_name(*, benchmark_name: str, target_system: str) -> str:
         return "agentic/os"
     if "tau2" in benchmark or "tau2" in target:
         return "agentic/tau2"
+    if "spider2" in benchmark or "spider2" in target:
+        return "spider2"
+    if "toolathlon" in benchmark or "toolathlon" in target:
+        return "toolathlon"
+    if "appworld" in benchmark or "appworld" in target:
+        return "appworld"
+    if "gaia" in benchmark or "gaia" in target:
+        return "agentic/gaia"
     if "arc" in benchmark or "reasoning" in benchmark or "reasoning" in target:
         return "reasoning"
     if "longmemeval" in benchmark:

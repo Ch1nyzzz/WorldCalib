@@ -14,4 +14,3 @@ evaluates the candidate (real tau2 episodes) after this session exits.
 
 <!-- INCLUDE: agentic/_base_core.md -->
 
-<!-- INCLUDE: agentic/_tau2_tail.md -->

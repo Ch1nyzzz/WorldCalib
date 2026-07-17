@@ -1,6 +1,6 @@
 ---
 name: worldcalib-proposer-tau2-surface
-description: tau2-specific evolving surface for the agentic proposer — the Tau2Scaffold.build_agent / LLMAgent subclass strategy, editable seed_passthrough/base paths, the tau2-specific hard rules (do not alter domain_policy; importing tau2.* is fine), and pending_eval conventions (kind="tau2_agent", scaffold_name="tau2_passthrough"). Spliced ahead of the shared calib core.
+description: tau2-specific evolving surface for the agentic proposer — the Tau2Scaffold.build_agent / LLMAgent subclass strategy, editable seed_passthrough/base paths, the tau2-specific hard rules (do not alter domain_policy / user simulator / evaluation; importing tau2.* is fine), and pending_eval conventions (kind="tau2_agent", scaffold_name="tau2_passthrough"). No failure-mode taxonomy and no mechanism suggestions: the proposer analyses all the feedback and patches the scaffold itself. Spliced ahead of the shared calib core.
 ---
 
 ## What you are evolving
@@ -23,23 +23,13 @@ from the edited snapshot. The editable surface:
   per-episode state on `self` is safe.
 
 The tau2 agent is driven by tau2's `Orchestrator`, NOT by an agentrl `query`
-loop. The LLM call goes through tau2's `generate()` (litellm). So you add
-strategy by returning a `tau2.agent.llm_agent.LLMAgent` **subclass**. Things you
-can do (non-exhaustive — invent what the failure modes call for):
-
-- override the agent's `system_prompt` property to layer extra
-  instructions/strategy on top of the (fixed) domain `policy` — e.g. planning
-  habits, verification before irreversible actions, when to ask the user vs. act,
-  tool-use discipline, how to read back state.
-- override `generate_next_message` / `_generate_next_message` to add reflection,
-  retry on malformed tool calls, self-consistency, tool-call validation, or
-  loop/stall detection across turns.
-- reshape the message history the model sees, or augment tool descriptions.
+loop. The LLM call goes through tau2's `generate()` (litellm). You add strategy
+by returning a `tau2.agent.llm_agent.LLMAgent` **subclass** (e.g. overriding the
+`system_prompt` property, `generate_next_message` / `_generate_next_message`).
 
 You may **not** change the `domain_policy` text itself (it is part of the task
 and is what the agent is graded against), nor the user simulator, nor the
-evaluation. Layer strategy *around* the policy. **Do not assume any fixed layer
-structure** — choose the mechanism that targets a real failure mode.
+evaluation. Layer strategy *around* the policy.
 
 ## tau2-specific hard rules
 
@@ -60,6 +50,5 @@ The exact output path and schema are in the iteration message. Independent of th
 - Point `extra.source_project_path` at the edited snapshot project source when
   you modify `project_source/src/worldcalib/agentic/backends/tau2/...`.
 - `top_k` must be a single integer (unused by the agent; set to 1).
-- The `hypothesis` field must state: expected passrate direction, the failure
-  family targeted, at least two independent evidence sources, and one
-  counterexample class the change was designed not to hurt.
+- The `hypothesis` field must state: the change you made, the expected passrate
+  direction, and the evidence it came from.

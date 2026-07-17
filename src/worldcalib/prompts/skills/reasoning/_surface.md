@@ -1,6 +1,6 @@
 ---
 name: worldcalib-proposer-reasoning-surface
-description: ARC-AGI-2-specific evolving surface for the reasoning proposer — the ArcScaffold.solve_task single-shot solver, editable seed_passthrough/base paths, ARC-specific hard rules, and pending_eval conventions (kind="arc_solver", scaffold_name="arc_passthrough"). Spliced ahead of the shared base core; shared by both the reasoning_calib and reasoning_nowmc arms.
+description: ARC-AGI-2-specific evolving surface for the reasoning proposer — what the editable solver snapshot contains (ArcScaffold.solve_task, seed_passthrough/base), the only hard constraints (single-shot only; test outputs/data-loader/evaluation OFF-LIMITS), and the pending_eval output contract (kind="arc_solver", scaffold_name="arc_passthrough"). No failure-mode taxonomy and no mechanism suggestions: the proposer analyses all the feedback and patches the solver itself. Spliced ahead of the shared base core; shared by both the reasoning_calib and reasoning_nowmc arms.
 ---
 
 ## What you are evolving
@@ -23,28 +23,17 @@ output grids (the first `max_attempts` are scored pass@k). The editable surface:
   seed `PassthroughArcScaffold` is a pure pass-through: it inherits the base
   `solve_task`, which for each test input builds a prompt via
   `build_arc_messages`, makes **one** `client.chat()` call at temperature 0.0,
-  and `parse_grid`s the reply into a single attempt. Override `solve_task`,
-  `build_arc_messages`, the grid parsing, or how the 2-attempt budget is spent to
-  return a smarter solver.
+  and `parse_grid`s the reply into a single attempt.
 - `src/worldcalib/reasoning/arc_scaffolds/base.py` — `ArcScaffold` base plus the
   grid helpers (`format_grid`, `parse_grid`, `grids_equal`, `build_arc_messages`,
   `ArcSolveResult`). `self.config` is the `ScaffoldConfig`; one fresh scaffold
   runs per task (`fresh()`), so per-task state on `self` is safe.
 
-Things you can do (non-exhaustive — invent what the failure modes call for):
-
-- reshape `build_arc_messages`: how the train demonstrations and the test input
-  are rendered (grid formatting, axis/coordinate annotations, color legends,
-  delta/diff hints), what instructions frame the transformation, how the model is
-  asked to emit the answer grid so `parse_grid` recovers it reliably.
-- restructure `solve_task`: add an explicit reasoning step before the grid, a
-  self-consistency vote across samples, a second differentiated attempt for the
-  pass@2 budget, a verification pass that re-derives the rule and checks it
-  reproduces the train outputs, or a candidate re-ranking.
-- harden parsing/repair so a correct-but-malformatted grid is not lost.
-
-**Do not assume any fixed prompt structure** — choose the mechanism that targets
-a real failure mode.
+Anything in that surface is solver you may rewrite however the evidence directs —
+there is no prescribed lever or failure mode. You may edit any file in the
+`arc_scaffolds` package **and add new files/modules**; the whole package
+propagates to the eval run, so new modules are importable. Read the source and the
+feedback and decide.
 
 ## ARC-specific hard rules
 
@@ -78,6 +67,5 @@ The exact output path and schema are in the iteration message. Independent of th
   you modify
   `project_source/src/worldcalib/reasoning/arc_scaffolds/...`.
 - `top_k` must be a single integer (unused by the solver; set to 1).
-- The `hypothesis` field must state: expected passrate direction, the failure
-  family targeted, at least two independent evidence sources, and one
-  counterexample class the change was designed not to hurt.
+- `hypothesis`: the change you made, the expected passrate direction, and the
+  evidence it came from.

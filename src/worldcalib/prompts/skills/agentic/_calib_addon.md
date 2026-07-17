@@ -1,6 +1,6 @@
 ---
 name: worldcalib-proposer-calib-addon
-description: The calibration layer (self-distill, NO external critic) layered onto the base proposer contract — the ONE thing that distinguishes the calib arm from the plain arm. It maintains an explicit, falsifiable MODEL of the environment in world_model_calibration.md (a mutable HEAD of beliefs + experiments + calibration, plus an append-only HISTORY of distill blocks) and runs one experiment per iteration as a single loop: predict → observe → correct. Frame-audit (read the raw evidence, attribute honestly), probe-vs-exploit (run the experiment that buys information or cashes a gain), and switch-when-spent are not separate mechanisms — they are facets of that loop. No layer enum, no certified ceilings, no pre-seeded failure modes: the model starts empty and is filled only from this run's evidence. Shared by every calib arm (spliced after the base core).
+description: The calibration layer (self-distill, NO external critic) layered onto the base proposer contract — the ONE thing that distinguishes the calib arm from the plain arm. It maintains an explicit, falsifiable MODEL of the environment in world_model_calibration.md (a mutable HEAD of beliefs + experiments + calibration, plus an append-only HISTORY of distill blocks) and runs one experiment per iteration as a single loop: predict → observe → correct. Frame-audit (read the raw evidence, attribute honestly) and probe-vs-exploit (run the experiment that buys information or cashes a gain) are not separate mechanisms — they are facets of that loop. No layer enum, no certified ceilings, no pre-seeded failure modes: the model starts empty and is filled only from this run's evidence. Shared by every calib arm (spliced after the base core).
 ---
 
 ## Self-distill environment calibration — the calib arm's one difference
@@ -8,9 +8,12 @@ description: The calibration layer (self-distill, NO external critic) layered on
 The plain arm reads the feedback and edits the agent. The calib arm does one extra
 thing: it maintains an explicit, **falsifiable model of the environment** and lets
 that model drive every candidate. A candidate is an *experiment* that tests and
-exploits the model; passrate is the downstream consequence; the model is the
-object you maintain. This is **self-distill** — there is no external critic, no
-`critic_feedback.md`: you predict, observe, and correct your own model.
+exploits the model. **The goal is unchanged from the base Objective: maximize the
+harness's passrate.** The world model is the *instrument* for getting there, never
+an end in itself — you maintain an accurate model because that is how you reliably
+pick interventions that actually raise passrate instead of chasing noise. This is
+**self-distill** — there is no external critic, no `critic_feedback.md`: you
+predict, observe, and correct your own model.
 
 Everything below is one idea — **each iteration is one experiment on the model,
 run as predict → observe → correct**. The disciplines you might expect as
@@ -38,7 +41,7 @@ Layout — a **mutable HEAD** + an **append-only HISTORY**, split at the first
     fact becomes an anchor you then burn iterations chasing. Prefer 5
     high-confidence beliefs over 20 vague ones.
   - **Experiments** — what you've tried against each belief and the verdict, so
-    you never re-run a spent direction: `- <belief E<n>>: <experiment> → <held|flat|harmful>`.
+    the model records what each experiment showed: `- <belief E<n>>: <experiment> → <held|flat|harmful>`.
   - **Calibration** — how well your recent predictions held (behavioral H/N,
     aggregate H/N over the last ~4). This is the meta-signal for the next
     experiment: weak calibration means trust the model less and buy information.
@@ -58,9 +61,15 @@ a. `cat ./runtime_config.md` for the ground-truth target model/base_url.
 b. `cat ./world_model_calibration.md`. If missing, abort and report.
 c. If `./prev_prediction.md` exists: read the **environment claim** it bet, then
    read the real outcome from `candidate_results/<id>.json` `tasks[]` vs the
-   **base iter's** `tasks[]`, plus the traces. **Grade against the RAW evidence —
-   the tool-call OUTPUTS and trace turns, not the agent's final message** — on two
-   de-noised axes:
+   **base iter's** `tasks[]`, plus the traces. **Grade against the RAW evidence,
+   not the agent's final message** — and RAW evidence is everything white-box: the
+   tool-call OUTPUTS, the trace turns, AND the harness source / control flow you
+   can read directly. The harness control flow IS part of the environment you are
+   modelling — not off-limits, not a black box. When a failure's cause is not
+   legible in the outputs, READ THE CODE PATH that produced it (the loop, the
+   context/tool machinery in the editable surface), or add a diagnostic probe and
+   re-run, rather than inferring the mechanism from aggregate symptoms. Grade on
+   two de-noised axes:
 
    - **Behavioral (from traces):** did the agent actually do what the claim
      implied on the targeted subset?
@@ -77,8 +86,12 @@ c. If `./prev_prediction.md` exists: read the **environment claim** it bet, then
    - behavior changed but the subset didn't move → the layer you blamed is not
      the bottleneck; the belief's causal claim is wrong — lower its confidence;
    - the belief was an **illusion from reading the surface** (the agent's final
-     message looked like failure, but the tool underneath returned nothing /
-     errored) → re-attribute to that lower layer and form the belief there;
+     message looked like failure, but the layer underneath — the tool's actual
+     output, OR the harness code path that produced the behavior — tells a
+     different story) → read that lower layer, **including the source itself**,
+     and re-attribute the belief there. A pre-baked label in the feedback (e.g.
+     a crash headline) is itself a surface claim — verify it against the raw
+     traceback / counters / code, never take it as the cause;
    - it held → raise confidence, flip to `confirmed`.
    Repeated disconfirmation simply keeps lowering a belief — **never read it as
    "the SUT is incapable."** You cannot certify a wall; you can only observe that
@@ -105,22 +118,20 @@ c. If `./prev_prediction.md` exists: read the **environment claim** it bet, then
    block marked bootstrap.
 d. Re-read `./world_model_calibration.md` so the rest reasons from the latest HEAD.
 
-### Choose the next experiment — information or gain
+### Choose the next experiment — let the model decide
 
-Pick the experiment with the highest value given the model's current state:
+No scheduling rule, no family bookkeeping, no coverage quota. The next experiment
+is simply whatever your current model makes most valuable: where the model is
+**uncertain about something that matters**, run the cheapest experiment that
+resolves it (it buys information, even if it won't move the score much); where the
+model is **confident**, run the experiment that acts on it (it cashes a gain).
+State which — information or gain — in the prediction.
 
-- where the **biggest unexplained chunk of failures has no trustworthy belief
-  yet**, run the *cheapest* experiment that would resolve it — it buys
-  information, even if it won't raise the score much. (You cannot call any cell
-  "model-limited" you have never actually probed.)
-- where the **biggest lever has a confident belief**, run the experiment that
-  acts on it — it cashes a gain.
-
-A belief you have already tested ~twice with no movement is **spent**: re-running
-it buys neither information nor gain, so lower it and bet elsewhere (you may come
-back later with a structurally different idea). `refine` (same family) vs
-`explore` (a new family) is just the *how*; information vs gain is the *why* —
-state both in the prediction.
+How you spread experiments across competing directions, and when to go deep on
+one versus widen to another, is **your research judgment from the evidence** —
+not a rule the harness imposes. An idea whose experiment moved nothing has simply
+lowered its own belief's confidence in the `Correct` step above; that updated
+model is the only thing that decides whether it is still worth revisiting.
 
 ### Predict (before the base `Design`) — write the bet to `./prediction.md`
 
@@ -145,8 +156,11 @@ E<n>: "<the belief this experiment tests or exploits>" | status:<hypothesis|conf
 
 ## Invariants (every round)
 
-- A failed bet that **updates the model** is a SUCCESSFUL calibration step — the
-  goal is an accurate environment model, not a winning candidate.
+- Within a *single iteration*, a failed bet that **updates the model** is still a
+  SUCCESSFUL calibration step — don't reward-hack or overfit to salvage one
+  score. This grades one iteration, not the run: the overall objective stays the
+  base Objective's — maximize passrate — and an accurate model is how you get
+  there.
 - Bet the ENVIRONMENT's behavior, never which individual tasks flip:
   single-task pass/fail sits below the noise floor and grades ~random.
 - Read stable-vs-unstable from `task_score_matrix.json` — an oscillating row is

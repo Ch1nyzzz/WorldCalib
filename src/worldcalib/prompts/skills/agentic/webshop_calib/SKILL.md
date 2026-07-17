@@ -17,4 +17,3 @@ exits.
 
 <!-- INCLUDE: agentic/_calib_addon.md -->
 
-<!-- INCLUDE: agentic/_webshop_tail.md -->
