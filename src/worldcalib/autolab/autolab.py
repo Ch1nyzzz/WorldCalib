@@ -207,6 +207,37 @@ class AutolabAttempt:
     errored: bool = False
     trial_name: str = ""
     trial_dir: str = ""
+    error: str | None = None
+
+
+def _summarize_exception_info(exception_info: Any) -> str | None:
+    """Condense harbor's trial ``exception_info`` into one diagnostic line.
+
+    harbor records ``{exception_type, exception_message, exception_traceback,
+    occurred_at}``. The proposer needs the type + message to tell a crashed
+    scaffold (e.g. ``AgentTimeoutError``) from a low-reward solve; the full
+    traceback lives in the trial dir. Returns None when there is no exception.
+    """
+
+    if not exception_info:
+        return None
+    if isinstance(exception_info, dict):
+        etype = str(exception_info.get("exception_type") or "").strip()
+        emsg = str(exception_info.get("exception_message") or "").strip()
+        if etype or emsg:
+            return f"{etype}: {emsg}".strip(": ").strip()[:300]
+        return str(exception_info)[:300]
+    return str(exception_info)[:300]
+
+
+def _read_harbor_stderr_tail(job_dir: Path, *, max_chars: int = 600) -> str:
+    """Tail of harbor's stderr for a job that produced no trials, '' if absent."""
+
+    try:
+        text = (job_dir / "harbor_stderr.txt").read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return ""
+    return text.strip()[-max_chars:]
 
 
 def load_autolab_tasks(
@@ -303,6 +334,8 @@ class AutolabHarborRunner:
         n_attempts: int = 1,
         timeout_multiplier: float = 1.0,
         concurrency: int = 4,
+        max_turns: int = 0,
+        max_task_seconds: int = 0,
         env_file: Path | None = None,
         reward_gate: float = DEFAULT_REWARD_GATE,
         score_mode: str = "best",
@@ -322,6 +355,17 @@ class AutolabHarborRunner:
         self.n_attempts = max(1, int(n_attempts))
         self.timeout_multiplier = float(timeout_multiplier)
         self.concurrency = max(1, int(concurrency))
+        # 0 = no cap (terminus-2 default). >0 = inject --ak max_turns to hard-bound
+        # the agent's episode loop, so a candidate whose finalization gate keeps
+        # rejecting task_complete cannot spin forever (see the iter that ran 1085+
+        # episodes); the loop ends at the cap and finalizes best-so-far.
+        self.max_turns = max(0, int(max_turns))
+        # 0 = no cap. >0 = absolute per-task agent wall-clock ceiling (seconds),
+        # applied gracefully via harbor's --agent-timeout-multiplier (the agent
+        # stops and the verifier scores the current state — not a hard kill). Only
+        # tasks whose own agent_timeout exceeds the cap are shortened; shorter
+        # tasks keep their (smaller) native budget.
+        self.max_task_seconds = max(0, int(max_task_seconds))
         self.env_file = Path(env_file) if env_file is not None else None
         self.reward_gate = float(reward_gate)
         self.score_mode = score_mode if score_mode in ("best", "avg") else "best"
@@ -372,7 +416,7 @@ class AutolabHarborRunner:
                 )
 
         count = len(task_results)
-        passrate = sum(1 for t in task_results if t.passed) / count if count else 0.0
+        passrate = self._objective_value(task_results)
         average_score = sum(t.score for t in task_results) / count if count else 0.0
         prompt_tokens = sum(t.prompt_tokens for t in task_results)
         completion_tokens = sum(t.completion_tokens for t in task_results)
@@ -489,6 +533,19 @@ class AutolabHarborRunner:
             duration_s=duration_s,
         )
 
+    def _objective_value(self, task_results: list[TaskResult]) -> float:
+        """The single search objective (see :mod:`worldcalib.pareto`).
+
+        Fills ``CandidateResult.passrate`` — which the frontier reads as *the*
+        objective, not necessarily a fraction-of-passed. AutoLab tasks are
+        pass/fail against ``reward_gate``, so the fraction is right here;
+        subclasses whose published metric is a mean (Terminal-Bench 2 averages
+        pass@1 over repeats with MEAN) override this.
+        """
+
+        count = len(task_results)
+        return sum(1 for t in task_results if t.passed) / count if count else 0.0
+
     def _build_task_result(
         self,
         *,
@@ -511,6 +568,11 @@ class AutolabHarborRunner:
         if not attempts:
             metadata["missing"] = True
             metadata["k"] = 0
+            # Zero trials = the scaffold/job broke before producing anything.
+            # Surface harbor's stderr tail so the proposer sees the cause.
+            harbor_tail = _read_harbor_stderr_tail(job_dir)
+            if harbor_tail:
+                metadata["errors"] = [harbor_tail]
             return TaskResult(
                 task_id=task.task_id,
                 question=task.instruction,
@@ -542,6 +604,7 @@ class AutolabHarborRunner:
                 "k": len(attempts),
                 "rewards": rewards,
                 "n_errored": sum(1 for a in attempts if a.errored),
+                "errors": sorted({a.error for a in attempts if a.error}),
                 "trial_dir": best_attempt.trial_dir,
                 "raw_metric_value": None,
             }
@@ -625,10 +688,25 @@ class AutolabHarborRunner:
             "-y",
             "--quiet",
         ]
+        # Absolute per-task agent wall-clock cap. harbor only exposes a
+        # multiplier, so convert the seconds cap into a per-task
+        # --agent-timeout-multiplier (overrides the agent slice of
+        # --timeout-multiplier) = min(multiplier, cap / agent_timeout_sec). Tasks
+        # already under the cap keep multiplier (unchanged); only longer-budget
+        # tasks (e.g. the 240min bm25/sstable) are shortened to the cap.
+        if self.max_task_seconds > 0 and task.agent_timeout_sec > 0:
+            agent_mult = min(multiplier, self.max_task_seconds / task.agent_timeout_sec)
+            argv += ["--agent-timeout-multiplier", f"{agent_mult:.6g}"]
         if self.env_file is not None:
             argv += ["--env-file", str(self.env_file)]
-        for key, value in _candidate_agent_kwargs(candidate).items():
+        agent_kwargs = _candidate_agent_kwargs(candidate)
+        for key, value in agent_kwargs.items():
             argv += ["--ak", f"{key}={_render_ak_value(value)}"]
+        # Hard episode cap. Inject only when the candidate did not set its own
+        # max_turns, so a candidate can still raise/lower it deliberately, but the
+        # default run is always bounded against a runaway finalization-gate loop.
+        if self.max_turns > 0 and "max_turns" not in agent_kwargs:
+            argv += ["--ak", f"max_turns={self.max_turns}"]
         for key, value in _candidate_agent_env(candidate).items():
             argv += ["--ae", f"{key}={value}"]
         return argv
@@ -707,6 +785,8 @@ def run_autolab_frontier(
     n_attempts: int = 1,
     timeout_multiplier: float = 1.0,
     concurrency: int = 4,
+    max_turns: int = 0,
+    max_task_seconds: int = 0,
     env_file: Path | None = None,
     reward_gate: float = DEFAULT_REWARD_GATE,
     eval_timeout_s: int = 300,
@@ -740,6 +820,8 @@ def run_autolab_frontier(
         n_attempts=n_attempts,
         timeout_multiplier=timeout_multiplier,
         concurrency=concurrency,
+        max_turns=max_turns,
+        max_task_seconds=max_task_seconds,
         env_file=env_file,
         reward_gate=reward_gate,
         eval_timeout_s=eval_timeout_s,
@@ -822,10 +904,13 @@ def _collect_attempts(
         if str(tr.get("task_name") or "") != task_id:
             # Defensive: a single-task job dir should only hold this task.
             continue
-        errored = tr.get("exception_info") is not None
+        error = _summarize_exception_info(tr.get("exception_info"))
+        errored = error is not None
         reward = _read_trial_reward(trial_dir, tr)
         if reward is None:
             reward, errored = 0.0, True
+            if error is None:
+                error = "no reward recorded (missing/unreadable verifier output)"
         agent_ctx = tr.get("agent_result") or {}
         attempts.append(
             AutolabAttempt(
@@ -836,6 +921,7 @@ def _collect_attempts(
                 errored=errored,
                 trial_name=str(tr.get("trial_name") or trial_dir.name),
                 trial_dir=str(trial_dir),
+                error=error,
             )
         )
     return attempts
