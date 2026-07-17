@@ -21,6 +21,5 @@ this skill describes what holds across iterations.
 
 <!-- INCLUDE: memory/_base_core.md -->
 
-<!-- INCLUDE: memory/_calib_addon.md -->
+<!-- INCLUDE: agentic/_calib_addon.md -->
 
-<!-- INCLUDE: memory/_locomo_tail.md -->

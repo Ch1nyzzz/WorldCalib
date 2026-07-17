@@ -15,4 +15,3 @@ exits.
 
 <!-- INCLUDE: agentic/_base_core.md -->
 
-<!-- INCLUDE: agentic/_webshop_tail.md -->
