@@ -139,7 +139,9 @@ def _add_common_optimize_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--api-key", default="EMPTY")
     parser.add_argument("--eval-timeout-s", type=int, default=300)
-    parser.add_argument("--proposer-agent", choices=("claude",), default="claude")
+    parser.add_argument(
+        "--proposer-agent", choices=("claude", "codex"), default="claude"
+    )
     parser.add_argument("--claude-model", default=None)
     parser.add_argument(
         "--claude-effort",
@@ -149,6 +151,15 @@ def _add_common_optimize_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--claude-base-url", default=None)
     parser.add_argument("--claude-auth-token", default=None)
     parser.add_argument("--claude-native-auth", action="store_true")
+    # Codex proposer (used only with --proposer-agent codex). Auth comes from
+    # $CODEX_HOME/auth.json, so there is no token flag.
+    parser.add_argument("--codex-model", default="gpt-5.6-sol")
+    parser.add_argument(
+        "--codex-reasoning-effort",
+        choices=("low", "medium", "high", "xhigh"),
+        default="xhigh",
+    )
+    parser.add_argument("--codex-home", default="")
     parser.add_argument("--propose-timeout-s", type=int, default=2400)
     parser.add_argument(
         "--propose-salvage-grace-s",
@@ -452,6 +463,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tb2-max-turns", type=int, default=None)
     parser.add_argument("--tb2-max-task-minutes", type=float, default=None)
     parser.add_argument("--tb2-env-file", type=Path, default=None)
+    parser.add_argument(
+        "--tb2-harbor-environment",
+        default=None,
+        help=(
+            "harbor -e: trial sandbox backend (docker|daytona|e2b|modal|...). "
+            "Default: harbor's own default (local docker). daytona needs "
+            "DAYTONA_API_KEY in the environment and uses each task's prebuilt "
+            "image remotely, freeing the host docker network pool."
+        ),
+    )
     parser.add_argument("--tb2-task-ids", default="")
     parser.add_argument("--tb2-force", action="store_true")
 
@@ -669,6 +690,9 @@ def main(argv: list[str] | None = None) -> int:
         claude_base_url=args.claude_base_url,
         claude_auth_token=args.claude_auth_token,
         claude_native_auth=args.claude_native_auth,
+        codex_model=args.codex_model,
+        codex_reasoning_effort=args.codex_reasoning_effort,
+        codex_home=args.codex_home,
         propose_timeout_s=args.propose_timeout_s,
         propose_salvage_grace_s=args.propose_salvage_grace_s,
         dry_run=args.dry_run,
@@ -881,6 +905,7 @@ def main(argv: list[str] | None = None) -> int:
             ("tb2_timeout_multiplier", "harbor_timeout_multiplier"),
             ("tb2_max_turns", "harbor_max_turns"),
             ("tb2_env_file", "harbor_env_file"),
+            ("tb2_harbor_environment", "harbor_environment"),
         ):
             value = getattr(args, flag, None)
             if value is not None:

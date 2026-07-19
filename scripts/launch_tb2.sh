@@ -48,12 +48,34 @@ if [ -f .env ]; then
   set +a
 fi
 
-for v in KIMI_API_KEY Solver_API_KEY; do
+# Solver credentials: default to the shared GPUGeek account, overridable per
+# launch (e.g. TB2_SOLVER_API_KEY="$TOGETHER_API_KEY" for a Together-hosted SUT).
+# TB2_SOLVER_API_KEY is not a .env name, so a value exported before invoking
+# this script survives the `source .env` above.
+TB2_SOLVER_API_KEY="${TB2_SOLVER_API_KEY:-${Solver_API_KEY:-}}"
+
+# PROPOSER_AGENT=codex runs the Codex CLI on the host (no docker; codex
+# provides its own workspace-write sandbox and authenticates from
+# $CODEX_HOME/auth.json). Default stays the dockerized kimi Claude proposer.
+PROPOSER_AGENT="${PROPOSER_AGENT:-claude}"
+CODEX_MODEL="${CODEX_MODEL:-gpt-5.6-sol}"
+CODEX_EFFORT="${CODEX_EFFORT:-xhigh}"
+
+required_vars=(TB2_SOLVER_API_KEY)
+if [ "$PROPOSER_AGENT" = "claude" ]; then
+  required_vars+=(KIMI_API_KEY)
+fi
+for v in "${required_vars[@]}"; do
   if [ -z "${!v:-}" ]; then
     printf 'fatal: %s is not set.\n' "$v" >&2
     exit 2
   fi
 done
+
+if [ "${TB2_HARBOR_ENV:-daytona}" = "daytona" ] && [ -z "${DAYTONA_API_KEY:-}" ]; then
+  printf 'fatal: TB2_HARBOR_ENV=daytona but DAYTONA_API_KEY is not set.\n' >&2
+  exit 2
+fi
 
 # Main venv python (runs worldcalib + the optimizer loop). Harbor itself is a
 # separate venv, reached through --tb2-harbor-binary / --tb2-harbor-python.
@@ -66,18 +88,59 @@ TB2_MODEL="${TB2_MODEL:-Vendor3/DeepSeek-V4-Flash}"
 TB2_API_BASE="${TB2_API_BASE:-${SOLVER_BASE_URL:-https://api.gpugeek.com/v1}}"
 # The published methodology: pass@1 x 2 repeats, MEAN.
 TB2_REPEATS="${TB2_REPEATS:-2}"
-# Each concurrent trial takes its own Docker compose network and the host's
-# default pool holds ~31 in total, shared with whatever else runs here. putty
-# measured 16 exhausting the pool ("all predefined address pools have been fully
-# subnetted") and failing 19 of 20 tasks. Keep real headroom.
+# Trial sandbox backend (harbor -e). Default daytona: trials run in remote
+# Daytona sandboxes from each task's prebuilt image, so the host's docker
+# network pool is untouched. Set TB2_HARBOR_ENV=docker to run locally — then
+# mind the pool: it holds ~31 networks total, shared with whatever else runs
+# here; putty measured 16 concurrent trials exhausting it ("all predefined
+# address pools have been fully subnetted") and failing 19 of 20 tasks.
+TB2_HARBOR_ENV="${TB2_HARBOR_ENV:-daytona}"
 TB2_CONCURRENCY="${TB2_CONCURRENCY:-8}"
+# Concurrent TRIALS = EVAL_WORKERS x TB2_REPEATS: EVAL_WORKERS harbor jobs run
+# at once (one per task) and each runs its k=TB2_REPEATS attempts concurrently
+# (TB2_CONCURRENCY caps the within-job side). The CLI's --eval-workers default
+# is 64 — unbounded in practice — so this MUST be passed explicitly.
+# 8 x 2 = 16 concurrent trials per arm.
+EVAL_WORKERS="${EVAL_WORKERS:-8}"
 
-if [[ "$KIMI_API_KEY" == sk-kimi-* ]]; then
+if [[ "${KIMI_API_KEY:-}" == sk-kimi-* ]]; then
   KIMI_BASE_URL="${KIMI_BASE_URL:-https://api.kimi.com/coding}"
 else
   KIMI_BASE_URL="${KIMI_BASE_URL:-https://api.moonshot.ai/anthropic}"
 fi
 KIMI_MODEL="${KIMI_MODEL:-kimi-k2.7}"
+
+DOCKER_USER_SPEC="${DOCKER_USER_SPEC:-$(id -u):$(id -g)}"
+PROPOSER_ARGS=()
+if [ "$PROPOSER_AGENT" = "codex" ]; then
+  PROPOSER_ARGS=(
+    --proposer-agent codex
+    --codex-model "$CODEX_MODEL"
+    --codex-reasoning-effort "$CODEX_EFFORT"
+    --proposer-sandbox none
+  )
+  if [ -n "${CODEX_HOME:-}" ]; then
+    PROPOSER_ARGS+=(--codex-home "$CODEX_HOME")
+  fi
+else
+  PROPOSER_ARGS=(
+    --proposer-agent claude
+    --claude-base-url "$KIMI_BASE_URL"
+    --claude-auth-token "$KIMI_API_KEY"
+    --claude-model "$KIMI_MODEL"
+    --claude-effort max
+    --proposer-sandbox docker
+    --proposer-docker-image docker-claude-kimi:latest
+    --proposer-docker-user "$DOCKER_USER_SPEC"
+    --proposer-docker-home /tmp
+    --proposer-docker-env KIMI_API_KEY
+    --proposer-docker-env ENABLE_TOOL_SEARCH
+    --proposer-docker-env CLAUDE_CODE_SUBAGENT_MODEL
+    --proposer-docker-env ANTHROPIC_DEFAULT_OPUS_MODEL
+    --proposer-docker-env ANTHROPIC_DEFAULT_SONNET_MODEL
+    --proposer-docker-env ANTHROPIC_DEFAULT_HAIKU_MODEL
+  )
+fi
 
 unset DIFF_EMBEDDING_MODEL
 export ENABLE_TOOL_SEARCH=false
@@ -96,7 +159,9 @@ DOCKER_USER_SPEC="${DOCKER_USER_SPEC:-$(id -u):$(id -g)}"
 
 mkdir -p logs runs
 
-run_id="tb2_claudekimi_k27_maxeffort_${VARIANT}_iter${ITERATIONS}_${TS}"
+# RUN_TAG marks a non-default SUT in the run id (e.g. RUN_TAG=minimaxm3).
+RUN_TAG="${RUN_TAG:-}"
+run_id="tb2_claudekimi_k27_maxeffort_${RUN_TAG:+${RUN_TAG}_}${VARIANT}_iter${ITERATIONS}_${TS}"
 
 resume_args=()
 if [ -n "${RESUME_RUN_ID:-}" ]; then
@@ -116,13 +181,19 @@ status_file="logs/launch_tb2_${VARIANT}_${TS}.status"
 # harbor --env-file: feed ONLY the resolved solver creds, never the repo .env.
 # The repo .env carries its own OPENAI_API_KEY for unrelated things; passed
 # verbatim it would silently authenticate the solver against the wrong account.
-ENV_FILE="$(mktemp "${TMPDIR:-/tmp}/tb2_solver_env.XXXXXX")"
-trap 'rm -f "$ENV_FILE"' EXIT
+#
+# The file must OUTLIVE this script: harbor re-reads it at every trial launch,
+# hours into the backgrounded run. A mktemp + EXIT trap (the first version)
+# deleted it the moment this launcher returned, starving every trial of creds.
+# It lives in the run dir instead (runs/ is gitignored), mode 600.
+mkdir -p "runs/${run_id}"
+ENV_FILE="runs/${run_id}/solver.env"
+umask 077
 {
-  printf 'OPENAI_API_KEY=%s\n' "$Solver_API_KEY"
+  printf 'OPENAI_API_KEY=%s\n' "$TB2_SOLVER_API_KEY"
   printf 'OPENAI_BASE_URL=%s\n' "$TB2_API_BASE"
 } > "$ENV_FILE"
-chmod 600 "$ENV_FILE"
+umask 022
 
 SEED_ARG=()
 if [ -n "$SEED_FROM" ]; then
@@ -149,7 +220,9 @@ setsid "$TB2_PY" -m worldcalib.optimize_cli \
   --tb2-harbor-model "$TB2_MODEL" \
   --tb2-api-base "$TB2_API_BASE" \
   --tb2-repeats "$TB2_REPEATS" \
+  --tb2-harbor-environment "$TB2_HARBOR_ENV" \
   --tb2-concurrency "$TB2_CONCURRENCY" \
+  --eval-workers "$EVAL_WORKERS" \
   --tb2-env-file "$ENV_FILE" \
   --proposer-variant "$VARIANT" \
   "${resume_args[@]}" \
@@ -161,21 +234,7 @@ setsid "$TB2_PY" -m worldcalib.optimize_cli \
   --iterations "$ITERATIONS" \
   --split train \
   --propose-timeout-s "$PROPOSE_TIMEOUT_S" \
-  --proposer-agent claude \
-  --claude-base-url "$KIMI_BASE_URL" \
-  --claude-auth-token "$KIMI_API_KEY" \
-  --claude-model "$KIMI_MODEL" \
-  --claude-effort max \
-  --proposer-sandbox docker \
-  --proposer-docker-image docker-claude-kimi:latest \
-  --proposer-docker-user "$DOCKER_USER_SPEC" \
-  --proposer-docker-home /tmp \
-  --proposer-docker-env KIMI_API_KEY \
-  --proposer-docker-env ENABLE_TOOL_SEARCH \
-  --proposer-docker-env CLAUDE_CODE_SUBAGENT_MODEL \
-  --proposer-docker-env ANTHROPIC_DEFAULT_OPUS_MODEL \
-  --proposer-docker-env ANTHROPIC_DEFAULT_SONNET_MODEL \
-  --proposer-docker-env ANTHROPIC_DEFAULT_HAIKU_MODEL \
+  "${PROPOSER_ARGS[@]}" \
   > "$log_path" 2>&1 < /dev/null &
 
 pid=$!
