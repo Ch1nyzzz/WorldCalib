@@ -96,6 +96,13 @@ TB2_REPEATS="${TB2_REPEATS:-2}"
 # address pools have been fully subnetted") and failing 19 of 20 tasks.
 TB2_HARBOR_ENV="${TB2_HARBOR_ENV:-daytona}"
 TB2_CONCURRENCY="${TB2_CONCURRENCY:-8}"
+# Optional per-task agent wall-clock cap (minutes). Applied gracefully via
+# harbor's --agent-timeout-multiplier: the agent stops at the cap and the
+# verifier scores the current state. Only tasks whose own budget exceeds the
+# cap are shortened — on the frozen train split that is build-pov-ray alone
+# (12000s; it has never passed even at full budget), and capping it at 60
+# cuts ~2h of straggler wall-clock from every iteration.
+TB2_MAX_TASK_MINUTES="${TB2_MAX_TASK_MINUTES:-}"
 # Concurrent TRIALS = EVAL_WORKERS x TB2_REPEATS: EVAL_WORKERS harbor jobs run
 # at once (one per task) and each runs its k=TB2_REPEATS attempts concurrently
 # (TB2_CONCURRENCY caps the within-job side). The CLI's --eval-workers default
@@ -222,6 +229,7 @@ setsid "$TB2_PY" -m worldcalib.optimize_cli \
   --tb2-repeats "$TB2_REPEATS" \
   --tb2-harbor-environment "$TB2_HARBOR_ENV" \
   --tb2-concurrency "$TB2_CONCURRENCY" \
+  ${TB2_MAX_TASK_MINUTES:+--tb2-max-task-minutes "$TB2_MAX_TASK_MINUTES"} \
   --eval-workers "$EVAL_WORKERS" \
   --tb2-env-file "$ENV_FILE" \
   --proposer-variant "$VARIANT" \
