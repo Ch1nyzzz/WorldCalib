@@ -358,6 +358,7 @@ class LocomoOptimizer:
 
         self._save_best_candidates(candidates)
         self._refresh_run_indexes(candidates)
+        self._materialize_seed_evidence(candidates)
 
         # Designer mode replaces the per-iteration loop with one long
         # self-directed session (see OptimizerConfig.designer). The iter0 seed
@@ -881,9 +882,8 @@ class LocomoOptimizer:
             self.run_store.commit_iteration(iteration)
         self._refresh_run_store(iteration)
         self._refresh_run_indexes(existing_candidates + evaluated)
-        self._score_prediction_feedback(
-            iteration, evaluated, workspace_dir, existing_candidates
-        )
+        self._stage_task_dump_evidence(iteration, evaluated)
+        self._grade_aggregate_bet(iteration, evaluated)
         return evaluated
 
     def _build_progressive_workspace(
@@ -943,6 +943,18 @@ class LocomoOptimizer:
             workspace_dir / "reference_iterations",
             reference_iterations=reference_iterations,
         )
+        if base_iter is not None:
+            self._stage_base_eval_evidence(
+                workspace_dir / "base_eval", base_iter
+            )
+        # The seed's own eval record + raw dumps (materialized once by
+        # _materialize_seed_evidence). References skip iter 0 by construction
+        # and base_iter=None means "clean seed", so without this the seed's
+        # rollouts are structurally unreadable: the first proposer designs
+        # blind and no later one can compare a candidate against the seed's
+        # behavior on the same task.
+        if (self._iteration_dir(0) / "dumps").is_dir():
+            self._stage_base_eval_evidence(workspace_dir / "seed_eval", 0)
         self._build_source_snapshot_workspace(
             iteration=iteration,
             source_family=self.config.progressive_target_system,
@@ -1346,6 +1358,156 @@ class LocomoOptimizer:
             "\n".join(lines) + "\n", encoding="utf-8"
         )
 
+    # ---- raw per-task dump evidence (proposer reads it directly) -------------
+
+    def _stage_task_dump_evidence(
+        self, iteration: int, evaluated: list[CandidateResult]
+    ) -> None:
+        """Copy each task's small RAW diagnostic dump files into this iter's
+        bundle so the proposer reads the benchmark's own verdict / traceback
+        itself — harvest no longer inlines or pre-diagnoses them.
+
+        Generic / opt-in: a backend participates by setting, per ``TaskResult``,
+        ``metadata['task_dump']`` (the on-disk dump dir) and
+        ``metadata['dump_evidence_files']`` (the small filenames worth staging,
+        e.g. ``eval_res.json`` + ``run.log``). Backends that set neither
+        (in-process scaffolds, or backends with their own small inlined
+        diagnostics) are a no-op. Heavy artifacts (full traces, the agent's
+        workspace tree) are deliberately NOT staged — only the declared small
+        files, each size-capped. Files land at
+        ``proposer_calls/iter_NNN/dumps/<candidate_id>/<task_id>/<file>`` and
+        ride into ``reference_iterations/iter_NNN/dumps/...`` via the normal
+        bundle copy. Best-effort; never breaks the loop.
+        """
+        # Files up to the cap are copied whole. Files OVER the cap are staged as
+        # an explicit tail (`<name>.tail.txt` with a truncation header) — never
+        # silently skipped. The old behavior (skip >512KB) systematically
+        # stripped evidence from exactly the tasks that most need diagnosis:
+        # timed-out rollouts have the longest trajectory.json, so the hardest
+        # failures arrived with no rollout at all and read as "nothing to see".
+        max_file_bytes = 4 * 1024 * 1024
+        tail_bytes = 512 * 1024
+        dest_root = self._iteration_dir(iteration) / "dumps"
+        for cand in evaluated:
+            cid = getattr(cand, "candidate_id", "") or "candidate"
+            # Per-task rows (with metadata) live only in the result json on
+            # disk — CandidateResult itself carries just the aggregates.
+            result_path = self._calib_result_path(cand)
+            if result_path is None:
+                continue
+            try:
+                rows = json.loads(result_path.read_text(encoding="utf-8")).get("tasks") or []
+            except (OSError, json.JSONDecodeError):
+                continue
+            for task in rows:
+                if not isinstance(task, dict):
+                    continue
+                meta = task.get("metadata") or {}
+                dump_dir = meta.get("task_dump")
+                files = meta.get("dump_evidence_files")
+                if not dump_dir or not files:
+                    continue
+                src_dir = Path(dump_dir)
+                if not src_dir.is_absolute():
+                    src_dir = (
+                        self.run_dir.parent.parent / dump_dir
+                        if str(dump_dir).startswith("runs/")
+                        else self.run_dir / dump_dir
+                    )
+                if not src_dir.is_dir():
+                    continue
+                tid = str(task.get("task_id") or "task")
+                for fname in files:
+                    src = src_dir / str(fname)
+                    try:
+                        if not src.is_file():
+                            continue
+                        size = src.stat().st_size
+                        if size == 0:
+                            continue
+                        dst_dir = dest_root / cid / tid
+                        dst_dir.mkdir(parents=True, exist_ok=True)
+                        if size <= max_file_bytes:
+                            shutil.copy2(src, dst_dir / src.name)
+                            continue
+                        with open(src, "rb") as fh:
+                            fh.seek(size - tail_bytes)
+                            tail = fh.read()
+                        header = (
+                            f"[TRUNCATED EVIDENCE: {src.name} is {size} bytes; "
+                            f"only the last {tail_bytes} bytes follow. A terminal "
+                            "task is lost at the end, so the tail is kept.]\n"
+                        )
+                        (dst_dir / f"{src.name}.tail.txt").write_bytes(
+                            header.encode("utf-8") + tail
+                        )
+                    except OSError:
+                        continue
+
+    def _materialize_seed_evidence(
+        self, candidates: list[CandidateResult]
+    ) -> None:
+        """Materialize ``proposer_calls/iter_000/{eval,dumps}`` from the seed.
+
+        Iteration 0 has no proposer call of its own, references exclude it by
+        construction, and ``base_iter=None`` means "clean seed" — so the seed's
+        eval record and raw per-trial dumps were reachable by no proposer.
+        Build them once here (idempotent across resume); every workspace then
+        stages them as ``seed_eval/`` (see ``_build_progressive_workspace``).
+        Best-effort; never breaks the loop.
+        """
+
+        seeds = [
+            c
+            for c in candidates
+            if _candidate_iteration(getattr(c, "candidate_id", "") or "")
+            in (None, 0)
+        ]
+        if not seeds:
+            return
+        iter0_dir = self._iteration_dir(0)
+        if (iter0_dir / "dumps").is_dir():
+            return
+        try:
+            eval_dir = iter0_dir / "eval"
+            eval_dir.mkdir(parents=True, exist_ok=True)
+            src = self._calib_result_path(seeds[0])
+            if src is not None:
+                shutil.copy2(src, eval_dir / "candidate_result.json")
+            self._stage_task_dump_evidence(0, seeds)
+        except OSError:
+            return
+
+    def _stage_base_eval_evidence(self, dest: Path, base_iter: int) -> None:
+        """Stage the base iter's eval record + raw dump evidence into the
+        workspace so the proposer can grade the prev prediction / analyse the
+        current frontier against RAW evidence.
+
+        The base is materialised as editable SOURCE in ``project_source/``, but
+        its eval OUTCOME is otherwise unreachable inside the sandbox (run-level
+        ``candidate_results`` is forbidden, and the base is stripped from
+        ``reference_iterations``). We copy only the small ``eval/`` record and
+        the staged ``dumps/`` — never the base's ``source_snapshot`` (already in
+        ``project_source/``) or its workspace/context. Best-effort.
+        """
+        src = self._iteration_dir(base_iter)
+        if not src.exists():
+            return
+        if dest.exists():
+            shutil.rmtree(dest)
+        copied = False
+        for sub in ("eval", "dumps"):
+            s = src / sub
+            if s.is_dir():
+                shutil.copytree(
+                    s,
+                    dest / sub,
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+                )
+                copied = True
+        if not copied and dest.exists():
+            shutil.rmtree(dest)
+
     # ---- calib variant: hidden mechanical prediction telemetry --------------
 
     def _calib_result_path(self, candidate: CandidateResult) -> Path | None:
@@ -1361,162 +1523,126 @@ class LocomoOptimizer:
         hits = sorted((self.run_dir / "candidate_results").glob(f"*{cid}*.json")) if cid else []
         return hits[0] if hits else None
 
-    def _calib_base_breakdown(
-        self, parsed, existing_candidates: list[CandidateResult]
-    ) -> dict:
-        """score_breakdown of the parent the proposer's prediction is measured against.
-
-        Resolution (NOT the current best — that would bias every prediction
-        toward the same reference and is unrelated to what the proposer actually
-        built on):
-          1. declared ``iter_<N>`` → that iter's candidate_results.
-          2. declared ``clean`` OR missing → the iter-0 seed baseline. Under the
-             default policy the editable source is re-baselined from the clean
-             snapshot every iter, so an undeclared/clean candidate genuinely
-             started from the baseline — its true per-type delta is vs iter 0.
-        """
-        from worldcalib.prediction_feedback import load_score_breakdown
-
-        if getattr(parsed, "base_iter", None) is not None:
-            hits = sorted(
-                (self.run_dir / "candidate_results").glob(
-                    f"iter{parsed.base_iter:03d}*.json"
-                )
-            )
-            if hits:
-                return load_score_breakdown(hits[0])
-        # clean / missing → iter-0 seed baseline (candidate_id without an
-        # "iter" prefix is the seed scaffold loaded from the baseline dir).
-        for c in existing_candidates:
-            cid = getattr(c, "candidate_id", "") or ""
-            if not cid.startswith("iter"):
-                p = self._calib_result_path(c)
-                if p:
-                    return load_score_breakdown(p)
-        if self.config.baseline_dir:
-            bdir = Path(self.config.baseline_dir) / "candidate_results"
-            hits = sorted(bdir.glob("*.json")) if bdir.exists() else []
-            if hits:
-                return load_score_breakdown(hits[0])
-        return {}
-
-    def _calib_base_task_outcomes(
-        self, parsed, existing_candidates: list[CandidateResult]
-    ) -> dict:
-        """Per-task ``{task_id: passed}`` of the base the prediction is measured
-        against. Same base resolution as :meth:`_calib_base_breakdown` (declared
-        iter_<N> → that iter; clean/missing → iter-0 seed baseline), but returns
-        the per-task outcomes the per-task flip grader needs."""
-        from worldcalib.prediction_feedback import load_task_outcomes
-
-        if getattr(parsed, "base_iter", None) is not None:
-            hits = sorted(
-                (self.run_dir / "candidate_results").glob(
-                    f"iter{parsed.base_iter:03d}*.json"
-                )
-            )
-            if hits:
-                return load_task_outcomes(hits[0])
-        for c in existing_candidates:
-            cid = getattr(c, "candidate_id", "") or ""
-            if not cid.startswith("iter"):
-                p = self._calib_result_path(c)
-                if p:
-                    return load_task_outcomes(p)
-        if self.config.baseline_dir:
-            bdir = Path(self.config.baseline_dir) / "candidate_results"
-            hits = sorted(bdir.glob("*.json")) if bdir.exists() else []
-            if hits:
-                return load_task_outcomes(hits[0])
-        return {}
-
-    def _score_prediction_feedback(
-        self,
-        iteration: int,
-        evaluated: list[CandidateResult],
-        workspace_dir: Path,
-        existing_candidates: list[CandidateResult],
+    def _grade_aggregate_bet(
+        self, iteration: int, evaluated: list[CandidateResult]
     ) -> None:
-        """calib variant: score this iter's prediction vs the real outcome.
+        """Mechanically grade this iter's ``## Aggregate bet (machine)`` from
+        the proposer's ``prediction.md`` against the realized STABLE per-task
+        outcomes, writing ``aggregate_grade.md`` into the iteration dir; the
+        next iter stages it as ``./prev_aggregate_grade.md``.
 
-        Runs AFTER eval. HIDDEN TELEMETRY ONLY — the self-distill protocol means
-        the proposer grades its own prediction next iter; nothing computed here
-        is ever staged into a proposer workspace. We mechanically compare the
-        prediction's per-task flips against the real outcome
-        (:mod:`worldcalib.prediction_feedback`, pure code, no LLM), append a row
-        to the run-level ``prediction_grades.md`` ledger, and log a
-        ``prediction_score`` event that forms the offline calibration learning
-        curve. Best-effort; never breaks the loop.
+        An instrument reading the proposer reconciles with its own self-grade —
+        it vetoes nothing and selects nothing. Calib-only; best-effort; never
+        breaks the loop.
         """
-        if self.config.proposer_variant != "calib" or not evaluated:
+        if self.config.proposer_variant == "nowmc":
+            return
+        pred_path = self._iteration_dir(iteration) / "workspace" / "prediction.md"
+        if not pred_path.is_file() or not evaluated:
             return
         try:
-            from worldcalib.prediction_feedback import (
-                evaluate_prediction,
+            from .prediction_feedback import (
+                grade_aggregate_bet,
+                historically_unstable_tasks,
                 load_task_outcomes,
+                parse_aggregate_bet,
                 parse_prediction,
+                render_aggregate_grade,
             )
 
-            pred_path = workspace_dir / "prediction.md"
-            if not pred_path.is_file():
-                return
-            pred_text = pred_path.read_text(encoding="utf-8")
-            parsed = parse_prediction(pred_text)
-            base_iter = parsed.base_iter
-            cand_path = self._calib_result_path(evaluated[0])
-            cand_outcomes = load_task_outcomes(cand_path) if cand_path else {}
-            base_outcomes = self._calib_base_task_outcomes(parsed, existing_candidates)
-            # Per-task flip grading: predicted task_id flips vs real flips
-            # (candidate tasks[] vs the declared base's tasks[]).
-            metrics = evaluate_prediction(pred_text, cand_outcomes, base_outcomes)
-
-            ledger_path = self.run_dir / "prediction_grades.md"
-            if not ledger_path.exists():
-                ledger_path.write_text(
-                    "# Prediction telemetry ledger (mechanical, offline-only — "
-                    "never shown to the proposer)\n\n"
-                    "| iter | flip_hit | n_pred | blind_spots | "
-                    "net_real | base |\n"
-                    "|---|---|---|---|---|---|\n",
+            text = pred_path.read_text(encoding="utf-8")
+            out_path = self._iteration_dir(iteration) / "aggregate_grade.md"
+            bet = parse_aggregate_bet(text)
+            if bet is None:
+                out_path.write_text(
+                    "# aggregate grade — no machine bet found\n\n"
+                    "prediction.md carried no `## Aggregate bet (machine)` "
+                    "section, so nothing was mechanically gradable this iter. "
+                    "Write the block (subset / min_mean_delta / "
+                    "max_stable_regressions) to get an instrument reading.\n",
                     encoding="utf-8",
                 )
-            with ledger_path.open("a", encoding="utf-8") as fh:
-                fh.write(
-                    f"| {iteration} | "
-                    f"{metrics.get('flip_hit_rate')} | "
-                    f"{metrics.get('n_predicted_flips')} | "
-                    f"{metrics.get('n_blind_spot_regressions')} | "
-                    f"{metrics.get('net_real_flips')} | "
-                    f"{parsed.base_raw or 'n/a'} |\n"
+                return
+            base_iter = parse_prediction(text).base_iter or 0
+            # Primary: iteration_index.json maps iteration -> result paths and
+            # handles seed results whose filenames carry no iterNNN prefix
+            # (e.g. appworld_passthrough.json), possibly living in the seed
+            # run's dir. Fallback: the iterNNN* filename convention.
+            base_path: Path | None = None
+            try:
+                index_rows = json.loads(
+                    (self.run_dir / "iteration_index.json").read_text(
+                        encoding="utf-8"
+                    )
                 )
-
-            self._append_event(
-                {
-                    "iteration": iteration,
-                    "event": "prediction_score",
-                    "flip_hit_rate": metrics.get("flip_hit_rate"),
-                    "n_predicted_flips": metrics.get("n_predicted_flips"),
-                    "n_flip_hits": metrics.get("n_flip_hits"),
-                    "n_blind_spot_regressions": metrics.get("n_blind_spot_regressions"),
-                    "net_real_flips": metrics.get("net_real_flips"),
-                    "base_iter": base_iter,
-                    "base_raw": parsed.base_raw,
-                }
+                for row in index_rows:
+                    if row.get("iteration") != base_iter:
+                        continue
+                    for rp in row.get("candidate_result_paths") or []:
+                        p = Path(rp)
+                        if not p.is_absolute():
+                            p = (
+                                self.run_dir.parent.parent / rp
+                                if rp.startswith("runs/")
+                                else self.run_dir / rp
+                            )
+                        if p.is_file():
+                            base_path = p
+                            break
+                    break
+            except (OSError, json.JSONDecodeError):
+                pass
+            if base_path is None:
+                hits = sorted(
+                    (self.run_dir / "candidate_results").glob(
+                        f"iter{base_iter:03d}*.json"
+                    )
+                )
+                base_path = hits[0] if hits else None
+            cand_path = self._calib_result_path(evaluated[0])
+            if cand_path is None or base_path is None:
+                out_path.write_text(
+                    f"# aggregate grade — ungradable\n\nbase iter_{base_iter} "
+                    "or this candidate's result json could not be resolved.\n",
+                    encoding="utf-8",
+                )
+                return
+            # Cross-iteration noise filter: the matrix staged into THIS iter's
+            # workspace holds the per-task history up to the previous iteration
+            # (the candidate itself is not in it), so tasks it marks as
+            # oscillating are noise no candidate should be charged for.
+            history_unstable: set[str] = set()
+            matrix_path = (
+                self._iteration_dir(iteration) / "workspace" / "task_score_matrix.json"
             )
-        except Exception as exc:  # noqa: BLE001
-            self._append_event(
-                {"event": "prediction_score_failed", "iteration": iteration,
-                 "error": repr(exc)}
+            try:
+                matrix = json.loads(matrix_path.read_text(encoding="utf-8"))
+                history_unstable = historically_unstable_tasks(
+                    matrix.get("tasks") or {}
+                )
+            except (OSError, json.JSONDecodeError, ValueError):
+                pass
+            metrics = grade_aggregate_bet(
+                bet,
+                load_task_outcomes(cand_path),
+                load_task_outcomes(base_path),
+                history_unstable=history_unstable,
             )
+            out_path.write_text(
+                render_aggregate_grade(iteration, metrics), encoding="utf-8"
+            )
+        except Exception as exc:  # noqa: BLE001 - instrument sidecar only
+            print(f"[calibration] aggregate-bet grading failed: {exc}", flush=True)
 
     def _sync_calibration_into_workspace(
         self, workspace_dir: Path, iteration: int
     ) -> None:
         """Copy the run-level calibration into the proposer's cwd, plus the
-        previous iter's prediction as ``prev_prediction.md``. Makes
-        ``world_model_calibration.md`` and ``prev_prediction.md`` available
-        at workspace-relative paths so SKILL.md doesn't depend on knowing
-        the docker mount layout.
+        previous iter's prediction as ``prev_prediction.md``, its mechanical
+        grade as ``prev_aggregate_grade.md``, and every earlier prediction
+        verbatim under ``predictions_history/``. Makes the calibration files
+        available at workspace-relative paths so SKILL.md doesn't depend on
+        knowing the docker mount layout.
 
         Hard no-op for the ``nowmc`` variant: the pure-default ablation carries
         no calibration protocol at all (no prose file, no prediction, no
@@ -1535,6 +1661,15 @@ class LocomoOptimizer:
             )
             if prev.exists():
                 shutil.copy2(prev, workspace_dir / "prev_prediction.md")
+            grade = self._iteration_dir(iteration - 1) / "aggregate_grade.md"
+            if grade.exists():
+                shutil.copy2(grade, workspace_dir / "prev_aggregate_grade.md")
+        hist_dir = workspace_dir / "predictions_history"
+        for i in range(1, iteration):
+            src_pred = self._iteration_dir(i) / "workspace" / "prediction.md"
+            if src_pred.exists():
+                hist_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src_pred, hist_dir / f"iter_{i:03d}.md")
 
     def _sync_calibration_back_from_workspace(self, cwd: Path | None) -> None:
         """If the proposer appended to its workspace-local calibration copy,
@@ -1552,7 +1687,49 @@ class LocomoOptimizer:
         if not src.exists():
             return
         dest = self.run_dir / "world_model_calibration.md"
-        shutil.copy2(src, dest)
+        new_text = src.read_text(encoding="utf-8")
+        old_text = dest.read_text(encoding="utf-8") if dest.exists() else ""
+        if not old_text.strip():
+            shutil.copy2(src, dest)
+            return
+        # The ledger is [mutable current-state head] + [append-only distill
+        # history]. The boundary is the FIRST ``## iter_`` distill heading: the
+        # head (current Environment model + Calibration scorecard) may be
+        # rewritten freely each iter; everything from the first ``## iter_``
+        # onward is append-only history.
+        def _split_head(text: str) -> tuple[str, str]:
+            m = re.search(r"(?m)^## iter_", text)
+            return (text, "") if m is None else (text[: m.start()], text[m.start():])
+
+        new_head, new_hist = _split_head(new_text)
+        _, old_hist = _split_head(old_text)
+        if not old_hist.strip() or new_hist.startswith(old_hist.rstrip("\n")):
+            # History preserved (head rewritten + zero-or-more distill blocks
+            # appended below it) — the intended B-structure path. Accept whole.
+            shutil.copy2(src, dest)
+            return
+        # History was rewritten/truncated: never let it shrink — keep the old
+        # history and graft only the distill sections whose headers it lacks,
+        # while still taking the proposer's new mutable head.
+        old_headers = set(re.findall(r"^## .+$", old_hist, flags=re.M))
+        parts = re.split(r"(?m)^(## .+)$", new_hist)
+        grafts = [
+            (parts[i] + (parts[i + 1] if i + 1 < len(parts) else "")).strip("\n")
+            for i in range(1, len(parts), 2)
+            if parts[i] not in old_headers
+        ]
+        merged = old_hist.rstrip("\n")
+        if grafts:
+            merged = merged + "\n\n" + "\n\n".join(grafts)
+        dest.write_text(
+            new_head.rstrip("\n") + "\n\n" + merged.lstrip("\n") + "\n",
+            encoding="utf-8",
+        )
+        print(
+            "[calibration] distill-history append-only violation: kept run-level "
+            f"history, grafted {len(grafts)} new section(s), updated current-state head.",
+            flush=True,
+        )
 
     def _refresh_run_store(self, iteration: int) -> None:
         """Best-effort RunStore trace/artifact refresh.
@@ -1944,6 +2121,9 @@ class LocomoOptimizer:
             "class",
             "factory",
             "generated_dir",
+            # load_candidate_scaffold routes on TOP-LEVEL kind (agent/tau2_agent/
+            # arc_solver); without it agentic specs fall into the memory loader.
+            "kind",
             "module",
             "module_path",
             "project_source_path",
@@ -2835,7 +3015,10 @@ class LocomoOptimizer:
         calibration protocol, not the evidence surface. Best-effort.
         """
 
-        from worldcalib.prediction_feedback import load_score_breakdown
+        from worldcalib.prediction_feedback import (
+            load_score_breakdown,
+            load_task_scores,
+        )
 
         try:
             parents = self._iteration_parent_map(iteration=iteration)
@@ -2877,13 +3060,23 @@ class LocomoOptimizer:
                     continue
                 breakdown = load_score_breakdown(result_path)
                 col = f"iter_{cand_iter:03d}"
-                for task_id, cell in breakdown.items():
-                    if task_id == "all" or not isinstance(cell, dict):
-                        continue
-                    score = cell.get("average_score")
-                    if score is None:
-                        continue
-                    matrix.setdefault(str(task_id), {})[col] = float(score)
+                typed_rows = {
+                    k: v
+                    for k, v in breakdown.items()
+                    if k != "all" and isinstance(v, dict)
+                }
+                if typed_rows:
+                    for task_id, cell in typed_rows.items():
+                        score = cell.get("average_score")
+                        if score is None:
+                            continue
+                        matrix.setdefault(str(task_id), {})[col] = float(score)
+                else:
+                    # Datasets whose score_breakdown is just the "all" bucket
+                    # (webshop/os) would leave the matrix empty — build the
+                    # per-task rows from tasks[] instead (mean across runs).
+                    for task_id, score in load_task_scores(result_path).items():
+                        matrix.setdefault(task_id, {})[col] = score
 
             manifest = {
                 "iteration": iteration,
@@ -3487,7 +3680,13 @@ class LocomoOptimizer:
             rel = path.relative_to(container_root)
         except ValueError:
             return path
-        return workspace_dir / rel
+        # Must return an ABSOLUTE host path: when the run is launched with a
+        # relative --out, workspace_dir is relative and callers that join
+        # relative results onto workspace_dir again would double the prefix
+        # (runs/<run>/.../workspace/runs/<run>/.../workspace/...), which then
+        # escapes the source_snapshot archive rewrite and leaves a dangling
+        # path the eval backends cannot resolve.
+        return (workspace_dir / rel).resolve(strict=False)
 
     def _copy_tree_if_exists(
         self,
