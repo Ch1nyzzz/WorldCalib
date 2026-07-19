@@ -216,6 +216,7 @@ class Tb2HarborRunner(AutolabHarborRunner):
         returncode: int | None,
         timed_out: bool,
         duration_s: float,
+        infra_retries: int = 0,
     ) -> TaskResult:
         result = super()._build_task_result(
             task=task,
@@ -224,6 +225,7 @@ class Tb2HarborRunner(AutolabHarborRunner):
             returncode=returncode,
             timed_out=timed_out,
             duration_s=duration_s,
+            infra_retries=infra_retries,
         )
 
         metadata = dict(result.metadata)
@@ -328,7 +330,14 @@ def run_tb2_frontier(
     max_turns: int = 0,
     max_task_seconds: int = 0,
     env_file: Path | None = None,
+    harbor_environment: str | None = None,
     reward_gate: float = DEFAULT_REWARD_GATE,
+    # MEAN over repeats — Terminal-Bench's methodology. Must match what the
+    # optimizer's iteration evals use (Tb2OptimizerConfig.score_mode), or the
+    # seed baseline is aggregated differently from every candidate compared
+    # against it. The runner's own default is "best", which silently inflated
+    # split tasks (rewards [0,1] -> 1.0) until this was threaded through.
+    score_mode: str = "avg",
     eval_timeout_s: int = 300,
     max_eval_workers: int = 1,
     dry_run: bool = False,
@@ -370,7 +379,9 @@ def run_tb2_frontier(
         max_turns=max_turns,
         max_task_seconds=max_task_seconds,
         env_file=env_file,
+        harbor_environment=harbor_environment,
         reward_gate=reward_gate,
+        score_mode=score_mode,
         eval_timeout_s=eval_timeout_s,
         max_eval_workers=max_eval_workers,
         dry_run=dry_run,

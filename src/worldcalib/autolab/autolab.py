@@ -210,6 +210,19 @@ class AutolabAttempt:
     error: str | None = None
 
 
+# Daytona-class infra failures: the sandbox/session never came up (or the
+# Daytona API refused mid-flight), so the attempt died through no fault of the
+# candidate. Counting these as reward=0 injects pure environment noise into the
+# optimizer's accept/reject signal — on a 20-task split one zeroed task is
+# ±0.05, the size of the effects being measured. Attempts whose error carries
+# one of these markers are retried and excluded from scoring.
+_INFRA_ERROR_MARKERS = ("DaytonaError", "DaytonaValidationError")
+
+
+def _is_infra_error(error: str | None) -> bool:
+    return bool(error) and any(marker in error for marker in _INFRA_ERROR_MARKERS)
+
+
 def _summarize_exception_info(exception_info: Any) -> str | None:
     """Condense harbor's trial ``exception_info`` into one diagnostic line.
 
@@ -337,6 +350,7 @@ class AutolabHarborRunner:
         max_turns: int = 0,
         max_task_seconds: int = 0,
         env_file: Path | None = None,
+        harbor_environment: str | None = None,
         reward_gate: float = DEFAULT_REWARD_GATE,
         score_mode: str = "best",
         eval_timeout_s: int = 300,
@@ -345,6 +359,7 @@ class AutolabHarborRunner:
         force: bool = False,
         verify_patches: bool = True,
         gpu_devices: str | None = None,
+        infra_retry_rounds: int = 2,
     ) -> None:
         self.tasks = tasks
         self.out_dir = out_dir
@@ -367,6 +382,11 @@ class AutolabHarborRunner:
         # tasks keep their (smaller) native budget.
         self.max_task_seconds = max(0, int(max_task_seconds))
         self.env_file = Path(env_file) if env_file is not None else None
+        # harbor -e / --env: where trial sandboxes run. None = harbor's default
+        # (local docker). "daytona" runs each trial in a remote Daytona sandbox
+        # (needs DAYTONA_API_KEY in the harbor subprocess env) and frees the
+        # host's docker network pool entirely.
+        self.harbor_environment = harbor_environment or None
         self.reward_gate = float(reward_gate)
         self.score_mode = score_mode if score_mode in ("best", "avg") else "best"
         self.eval_timeout_s = int(eval_timeout_s)
@@ -375,6 +395,9 @@ class AutolabHarborRunner:
         self.force = force
         self.verify_patches = verify_patches
         self.gpu_devices = gpu_devices
+        # How many times to re-run the trials an infra (Daytona) failure ate
+        # before giving up and scoring what remains. 0 disables retries.
+        self.infra_retry_rounds = max(0, int(infra_retry_rounds))
 
     # -- public API ---------------------------------------------------------
 
@@ -517,13 +540,67 @@ class AutolabHarborRunner:
             (jobs_dir / "harbor_stderr.txt").write_text(
                 _timeout_output_to_text(exc.stderr), encoding="utf-8"
             )
-        duration_s = time.time() - started
-
         attempts = _collect_attempts(
             job_dir=jobs_dir / job_name,
             task_id=task.task_id,
             gate=self.reward_gate,
         )
+
+        # Re-run the trials Daytona ate. Non-infra attempts (including real
+        # failures and timeouts) are kept as-is; only infra-errored ones are
+        # replaced by fresh trials, so k stays at n_attempts.
+        infra_retries = 0
+        while infra_retries < self.infra_retry_rounds:
+            infra = [a for a in attempts if _is_infra_error(a.error)]
+            if not infra:
+                break
+            infra_retries += 1
+            retry_name = f"{job_name}__r{infra_retries}"[:96]
+            retry_argv = self._build_argv(
+                task=task,
+                candidate=candidate,
+                jobs_dir=jobs_dir,
+                job_name=retry_name,
+                agent_source=agent_source,
+                n_attempts_override=len(infra),
+            )
+            (jobs_dir / f"harbor_command__r{infra_retries}.txt").write_text(
+                " ".join(retry_argv), encoding="utf-8"
+            )
+            try:
+                completed = _run_subprocess_with_timeout(
+                    retry_argv,
+                    cwd=Path.cwd(),
+                    timeout=per_task_timeout,
+                    extra_env=self._subprocess_env(agent_source),
+                )
+                (jobs_dir / f"harbor_stdout__r{infra_retries}.txt").write_text(
+                    completed.stdout, encoding="utf-8"
+                )
+                (jobs_dir / f"harbor_stderr__r{infra_retries}.txt").write_text(
+                    completed.stderr, encoding="utf-8"
+                )
+            except subprocess.TimeoutExpired as exc:
+                timed_out = True
+                (jobs_dir / f"harbor_stdout__r{infra_retries}.txt").write_text(
+                    _timeout_output_to_text(exc.stdout), encoding="utf-8"
+                )
+                (jobs_dir / f"harbor_stderr__r{infra_retries}.txt").write_text(
+                    _timeout_output_to_text(exc.stderr), encoding="utf-8"
+                )
+            retry_attempts = _collect_attempts(
+                job_dir=jobs_dir / retry_name,
+                task_id=task.task_id,
+                gate=self.reward_gate,
+            )
+            if not retry_attempts:
+                # Retry produced no trials at all; keep the original evidence.
+                break
+            attempts = [
+                a for a in attempts if not _is_infra_error(a.error)
+            ] + retry_attempts[: len(infra)]
+
+        duration_s = time.time() - started
         return self._build_task_result(
             task=task,
             attempts=attempts,
@@ -531,6 +608,7 @@ class AutolabHarborRunner:
             returncode=returncode,
             timed_out=timed_out,
             duration_s=duration_s,
+            infra_retries=infra_retries,
         )
 
     def _objective_value(self, task_results: list[TaskResult]) -> float:
@@ -555,6 +633,7 @@ class AutolabHarborRunner:
         returncode: int | None,
         timed_out: bool,
         duration_s: float,
+        infra_retries: int = 0,
     ) -> TaskResult:
         metadata = self._base_metadata(task)
         metadata.update(
@@ -565,6 +644,8 @@ class AutolabHarborRunner:
                 "duration_s": duration_s,
             }
         )
+        if infra_retries:
+            metadata["infra_retries"] = infra_retries
         if not attempts:
             metadata["missing"] = True
             metadata["k"] = 0
@@ -586,24 +667,37 @@ class AutolabHarborRunner:
                 metadata=metadata,
             )
 
-        rewards = [a.reward for a in attempts]
+        # Attempts an infra (Daytona) failure ate are evidence, never signal:
+        # they stay visible in `errors`/`n_infra_errored` but are excluded from
+        # the reward aggregation. Only when EVERY attempt (post-retry) died in
+        # infra do we fall back to scoring them (an honest 0), flagged loudly
+        # so downstream analysis can discount the task.
+        scoring = [a for a in attempts if not _is_infra_error(a.error)]
+        n_infra = len(attempts) - len(scoring)
+        if not scoring:
+            scoring = attempts
+            metadata["infra_failure"] = True
+
+        rewards = [a.reward for a in scoring]
         avg_at_k = sum(rewards) / len(rewards)
         best_at_k = max(rewards)
-        best_attempt = max(attempts, key=lambda a: a.reward)
+        best_attempt = max(scoring, key=lambda a: a.reward)
         if self.score_mode == "avg":
             score = avg_at_k
             passed = avg_at_k >= self.reward_gate
         else:
             score = best_at_k
-            passed = any(a.passed for a in attempts)
+            passed = any(a.passed for a in scoring)
         metadata.update(
             {
                 "reward": best_attempt.reward,
                 "avg_at_k": avg_at_k,
                 "best_at_k": best_at_k,
-                "k": len(attempts),
+                "k": len(scoring),
+                "k_raw": len(attempts),
                 "rewards": rewards,
-                "n_errored": sum(1 for a in attempts if a.errored),
+                "n_errored": sum(1 for a in scoring if a.errored),
+                "n_infra_errored": n_infra,
                 "errors": sorted({a.error for a in attempts if a.error}),
                 "trial_dir": best_attempt.trial_dir,
                 "raw_metric_value": None,
@@ -648,6 +742,7 @@ class AutolabHarborRunner:
         jobs_dir: Path,
         job_name: str,
         agent_source: Path | None = None,
+        n_attempts_override: int | None = None,
     ) -> list[str]:
         model = str(candidate.get("model") or self.harbor_model)
         multiplier = float(candidate.get("timeout_multiplier") or self.timeout_multiplier)
@@ -675,7 +770,7 @@ class AutolabHarborRunner:
             "--job-name",
             job_name,
             "-k",
-            str(self.n_attempts),
+            str(n_attempts_override or self.n_attempts),
             # -n = harbor's "concurrent trials": run this task's n_attempts
             # trials in parallel rather than serially. Sourced from
             # --autolab-concurrency (self.concurrency); was hardcoded to 1,
@@ -699,6 +794,8 @@ class AutolabHarborRunner:
             argv += ["--agent-timeout-multiplier", f"{agent_mult:.6g}"]
         if self.env_file is not None:
             argv += ["--env-file", str(self.env_file)]
+        if self.harbor_environment:
+            argv += ["-e", self.harbor_environment]
         agent_kwargs = _candidate_agent_kwargs(candidate)
         for key, value in agent_kwargs.items():
             argv += ["--ak", f"{key}={_render_ak_value(value)}"]
