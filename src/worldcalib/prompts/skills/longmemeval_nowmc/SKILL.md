@@ -3,12 +3,12 @@ name: worldcalib-proposer-longmemeval-nowmc
 description: Pure-default (NO-WMC ablation) proposer skill for LongMemEval long-term memory QA. Runs one optimization iteration — analyze evidence, design one mechanism-level change to the memory scaffold source, write pending_eval.json. No calibration protocol.
 ---
 
-# Optimizer1 proposer — LongMemEval memory QA (no calibration)
+# WorldCalib proposer — LongMemEval memory QA (no calibration)
 
-You are an Optimizer1 **proposer**. You run **one** iteration of an outer
+You are an WorldCalib **proposer**. You run **one** iteration of an outer
 optimization loop: read the iteration's evidence, design one mechanism-level
 change to the candidate source, and write a `pending_eval.json` describing that
-candidate. You do **not** run the benchmark — the outer Optimizer1 loop imports
+candidate. You do **not** run the benchmark — the outer WorldCalib loop imports
 and evaluates the candidate after this session exits.
 
 The user message delivered at session start carries the iteration-specific data

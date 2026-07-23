@@ -1,18 +1,4 @@
-"""Shared self-distill scaffold mixin.
-
-``ScaffoldMixin`` collects the backend-agnostic plumbing every agent scaffold
-needs — the ``name`` / ``reference_urls`` class attributes, the ``__init__``
-that stores a :class:`ScaffoldConfig`, and the ``fresh()`` factory the
-evaluators call to get a state-free instance per episode.
-
-Both backend bases mix this in:
-
-- ``AgentScaffold(BaseClient, ScaffoldMixin)`` (agentbench / agentrl)
-- ``Tau2Scaffold(ScaffoldMixin)`` (tau2)
-
-This module is import-light and stays free of ``agentrl`` / ``tau2`` so it can
-sit in candidate snapshots and import in any venv.
-"""
+"""Shared state-free scaffold mixin for agent-policy benchmarks."""
 
 from __future__ import annotations
 
@@ -24,9 +10,8 @@ from worldcalib.scaffolds.base import ScaffoldConfig
 class ScaffoldMixin:
     """Common name/config/fresh plumbing for optimizable agent scaffolds.
 
-    Subclasses override the backend-specific optimizable surface (``query`` for
-    agentbench, ``build_agent`` for tau2). This mixin only owns identity and
-    lifecycle, none of which touches ``agentrl`` or ``tau2``.
+    Subclasses provide the benchmark-specific optimization surface; this mixin
+    owns only identity, configuration, and lifecycle.
     """
 
     name: str = "agentic_scaffold"

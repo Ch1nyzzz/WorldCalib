@@ -4,7 +4,7 @@
 fields the QA trace builder expects (``task_id, question, gold_answer,
 prediction, score, passed, prompt_tokens, completion_tokens, retrieved``), plus
 diagnostic ``status``/``error`` metadata, so we delegate to the shared
-``_build_trace_for_qa`` helper like the AgentBench / tau2 adapters.
+``_build_trace_for_qa`` helper like the other agent adapters.
 """
 
 from __future__ import annotations

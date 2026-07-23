@@ -3,7 +3,7 @@ name: worldcalib-proposer-appworld-nowmc
 description: Pure-default (NO-WMC ablation) proposer skill for the AppWorld interactive coding agent. Runs one optimization iteration — analyze evidence, design one mechanism-level change to the ReAct code agent, write pending_eval.json. No calibration protocol.
 ---
 
-# Optimizer1 proposer — AppWorld coding agent (no calibration)
+# WorldCalib proposer — AppWorld coding agent (no calibration)
 
 You run **one** iteration of an outer optimization loop: read the iteration's
 evidence, design one mechanism-level change to the AppWorld agent's ReAct code
@@ -13,4 +13,4 @@ tests) after this session exits.
 
 <!-- INCLUDE: appworld/_surface.md -->
 
-<!-- INCLUDE: agentic/_base_core.md -->
+<!-- INCLUDE: shared/_base_core.md -->

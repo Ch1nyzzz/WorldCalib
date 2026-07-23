@@ -121,27 +121,261 @@ def parse_prediction(text: str) -> ParsedPrediction:
     return ParsedPrediction(base_raw=base_raw, base_iter=base_iter, per_task=per_task)
 
 
+# --- aggregate (subset-level) bet: the calib addon's machine-gradable unit ---
+
+@dataclass
+class AggregateBet:
+    """The ``## Aggregate bet (machine)`` block of a calib ``prediction.md``.
+
+    Unlike the legacy per-task flips (banned by the calib addon as
+    below-noise-floor), this bets a SUBSET's aggregate behavior: the mean
+    stable pass-rate delta on named tasks plus a run-wide stable-regression
+    bound. Concrete, checkable, and de-noised by averaging.
+    """
+
+    subset: list[str]
+    min_mean_delta: float | None
+    max_stable_regressions: int | None
+
+
+def historically_unstable_tasks(
+    matrix_tasks: dict[str, dict[str, float]], min_transitions: int = 2
+) -> set[str]:
+    """Task_ids whose cross-iteration pass/fail history oscillates.
+
+    ``matrix_tasks`` is the ``tasks`` object of a staged
+    ``task_score_matrix.json``: ``{task_id: {"iter_000": score, ...}}``.
+    A task is historically unstable when its pass/fail sequence (score > 0,
+    columns in iteration order) changes direction at least ``min_transitions``
+    times. One transition is a legitimate one-off improvement or regression;
+    two or more means the task already flips back and forth across scaffolds,
+    so a flip under the current candidate carries no attribution signal.
+    """
+    unstable: set[str] = set()
+    for task_id, cols in matrix_tasks.items():
+        if not isinstance(cols, dict):
+            continue
+        ordered: list[tuple[int, float]] = []
+        for key, val in cols.items():
+            m = re.match(r"iter_?0*(\d+)$", str(key))
+            if m and isinstance(val, (int, float)):
+                ordered.append((int(m.group(1)), float(val)))
+        seq = [v > 0 for _, v in sorted(ordered)]
+        transitions = sum(1 for a, b in zip(seq, seq[1:]) if a != b)
+        if transitions >= min_transitions:
+            unstable.add(str(task_id))
+    return unstable
+
+
+def parse_aggregate_bet(text: str) -> AggregateBet | None:
+    """Parse the ``## Aggregate bet (machine)`` section; None if absent/empty."""
+    body = _section_body(text, "aggregate bet")
+    if not body.strip():
+        return None
+    subset: list[str] = []
+    min_delta: float | None = None
+    max_regr: int | None = None
+    for line in body.splitlines():
+        m = re.match(
+            r"\s*[-*]\s*(subset|min_mean_delta|max_stable_regressions)\s*:\s*(.+)$",
+            line,
+            re.IGNORECASE,
+        )
+        if not m:
+            continue
+        key, val = m.group(1).lower(), m.group(2).strip()
+        if key == "subset":
+            subset = [
+                t.strip().strip("`")
+                for t in val.split(",")
+                if t.strip() and not t.strip().startswith("<")
+            ]
+        elif key == "min_mean_delta":
+            fm = re.search(r"-?\d+(?:\.\d+)?", val)
+            if fm:
+                min_delta = float(fm.group(0))
+        elif key == "max_stable_regressions":
+            im = re.search(r"\d+", val)
+            if im:
+                max_regr = int(im.group(0))
+    if not subset and min_delta is None and max_regr is None:
+        return None
+    return AggregateBet(
+        subset=subset, min_mean_delta=min_delta, max_stable_regressions=max_regr
+    )
+
+
+def grade_aggregate_bet(
+    bet: AggregateBet,
+    candidate_outcomes: dict[str, bool],
+    base_outcomes: dict[str, bool],
+    history_unstable: set[str] | None = None,
+) -> dict:
+    """Grade an aggregate bet on STABLE outcomes only (``load_task_outcomes``).
+
+    Subset tasks unstable in either side are excluded and reported; the
+    regression bound is checked run-wide (all tasks shared by both sides).
+
+    ``history_unstable`` (from :func:`historically_unstable_tasks` over the
+    staged ``task_score_matrix.json``) names tasks whose pass/fail already
+    oscillates across prior iterations. Their flips are reported but NOT
+    counted against ``max_stable_regressions``: charging a known noise task
+    to the candidate misattributes noise as harm (and has caused mechanisms
+    that were behaviorally working to be abandoned).
+    """
+    history_unstable = history_unstable or set()
+    graded = [t for t in bet.subset if t in candidate_outcomes and t in base_outcomes]
+    excluded = sorted(set(bet.subset) - set(graded))
+    base_rate = (
+        sum(base_outcomes[t] for t in graded) / len(graded) if graded else None
+    )
+    cand_rate = (
+        sum(candidate_outcomes[t] for t in graded) / len(graded) if graded else None
+    )
+    delta = (
+        cand_rate - base_rate
+        if cand_rate is not None and base_rate is not None
+        else None
+    )
+    all_regressions = sorted(
+        t
+        for t in candidate_outcomes
+        if t in base_outcomes and base_outcomes[t] and not candidate_outcomes[t]
+    )
+    noisy_regressions = sorted(t for t in all_regressions if t in history_unstable)
+    regressions = sorted(t for t in all_regressions if t not in history_unstable)
+    delta_held = (
+        delta >= bet.min_mean_delta
+        if (bet.min_mean_delta is not None and delta is not None)
+        else None
+    )
+    regr_held = (
+        len(regressions) <= bet.max_stable_regressions
+        if bet.max_stable_regressions is not None
+        else None
+    )
+    return {
+        "subset": list(bet.subset),
+        "subset_graded": graded,
+        "subset_excluded_unstable": excluded,
+        "base_mean_pass": base_rate,
+        "candidate_mean_pass": cand_rate,
+        "mean_delta": delta,
+        "predicted_min_mean_delta": bet.min_mean_delta,
+        "delta_held": delta_held,
+        "stable_regressions": regressions,
+        "n_stable_regressions": len(regressions),
+        "history_unstable_regressions": noisy_regressions,
+        "n_history_unstable_regressions": len(noisy_regressions),
+        "predicted_max_stable_regressions": bet.max_stable_regressions,
+        "regressions_held": regr_held,
+    }
+
+
+def render_aggregate_grade(iteration: int, m: dict) -> str:
+    """Render grade metrics as the ``aggregate_grade.md`` the proposer reads."""
+
+    def fmt(x: object) -> str:
+        if x is None:
+            return "n/a"
+        return f"{x:.3f}" if isinstance(x, float) else str(x)
+
+    def verdict(v: bool | None) -> str:
+        return "n/a" if v is None else ("HELD" if v else "MISSED")
+
+    return "\n".join(
+        [
+            f"# aggregate grade — iter_{iteration:03d} "
+            "(mechanical; an instrument reading, not a veto)",
+            "",
+            f"verdict: subset-delta {verdict(m['delta_held'])} | "
+            f"regressions {verdict(m['regressions_held'])}",
+            "",
+            f"- subset graded (stable in base AND candidate): "
+            f"{len(m['subset_graded'])}/{len(m['subset'])}",
+            f"- excluded as unstable: "
+            f"{', '.join(m['subset_excluded_unstable']) or 'none'}",
+            f"- subset stable pass-rate: base {fmt(m['base_mean_pass'])} -> "
+            f"candidate {fmt(m['candidate_mean_pass'])} "
+            f"(delta {fmt(m['mean_delta'])}; predicted >= "
+            f"{fmt(m['predicted_min_mean_delta'])})",
+            f"- run-wide stable regressions: {m['n_stable_regressions']} "
+            f"(predicted <= {fmt(m['predicted_max_stable_regressions'])})",
+            f"- regression task_ids: {', '.join(m['stable_regressions']) or 'none'}",
+            f"- flips on historically-oscillating tasks (NOT counted against "
+            f"the bound; cross-iter noise per task_score_matrix): "
+            f"{', '.join(m.get('history_unstable_regressions') or []) or 'none'}",
+            "",
+            "Reconcile this with your own grade in the distill block: agreement",
+            "raises trust in your reading; disagreement is evidence your reading",
+            "of the environment is biased somewhere.",
+            "",
+        ]
+    )
+
+
 # --- per-task outcome helpers ------------------------------------------------
 
-def load_task_outcomes(result_path: Path) -> dict[str, bool]:
-    """Read a candidate_results/*.json and return ``{task_id: passed}``."""
+def _iter_task_rows(result_path: Path):
+    """Yield ``(task_id, passed, score)`` for every row in a result's tasks[].
+
+    With multi-run evaluation (``runs >= 2``) the same task_id appears once per
+    run; callers aggregate.
+    """
     try:
         d = json.loads(Path(result_path).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return {}
-    out: dict[str, bool] = {}
+        return
     for t in d.get("tasks") or []:
         if not isinstance(t, dict):
             continue
         tid = t.get("task_id") or t.get("id") or t.get("question_id")
         if tid is None:
             continue
+        score = t.get("score")
         passed = t.get("passed")
         if passed is None:
-            score = t.get("score")
             passed = score is not None and float(score) > 0
-        out[str(tid)] = bool(passed)
-    return out
+        yield str(tid), bool(passed), (float(score) if score is not None else None)
+
+
+def load_task_outcomes(result_path: Path) -> dict[str, bool]:
+    """Read a candidate_results/*.json and return ``{task_id: passed}``.
+
+    Only STABLE tasks are returned: with multi-run evaluation a task whose runs
+    disagree (e.g. 1/2 passed) is noise, not signal — it is dropped here so the
+    per-task flip grader never attributes a flip to it. Single-run results are
+    unaffected (every task is trivially stable).
+    """
+    runs_by_task: dict[str, list[bool]] = {}
+    for tid, passed, _ in _iter_task_rows(result_path):
+        runs_by_task.setdefault(tid, []).append(passed)
+    return {
+        tid: runs[0]
+        for tid, runs in runs_by_task.items()
+        if all(r == runs[0] for r in runs)
+    }
+
+
+def load_task_pass_runs(result_path: Path) -> dict[str, list[bool]]:
+    """Per-task pass outcome of every run: ``{task_id: [passed, ...]}``.
+
+    The unstable tasks (mixed True/False) that :func:`load_task_outcomes`
+    drops are visible here for callers that want to report them.
+    """
+    runs_by_task: dict[str, list[bool]] = {}
+    for tid, passed, _ in _iter_task_rows(result_path):
+        runs_by_task.setdefault(tid, []).append(passed)
+    return runs_by_task
+
+
+def load_task_scores(result_path: Path) -> dict[str, float]:
+    """Mean score per task across runs: ``{task_id: mean_score}``."""
+    scores_by_task: dict[str, list[float]] = {}
+    for tid, _, score in _iter_task_rows(result_path):
+        if score is not None:
+            scores_by_task.setdefault(tid, []).append(score)
+    return {tid: sum(s) / len(s) for tid, s in scores_by_task.items()}
 
 
 def actual_flips(
@@ -270,4 +504,38 @@ if aaa does not flip, the mechanism is wrong
     assert out["net_real_flips"] == 2 - 2
     assert out["model_limited"] == ["LME::s::fff", "LME::s::ggg"]
     assert out["model_limited_overruled"] == ["LME::s::ggg"]
+
+    # aggregate (machine) bet: parse + grade
+    agg_pred = sample_pred + """
+## Aggregate bet (machine) — parsed and graded mechanically
+- subset: LME::s::aaa, LME::s::bbb, LME::s::ddd
+- min_mean_delta: 0.30
+- max_stable_regressions: 1
+"""
+    bet = parse_aggregate_bet(agg_pred)
+    assert bet is not None
+    assert bet.subset == ["LME::s::aaa", "LME::s::bbb", "LME::s::ddd"]
+    assert bet.min_mean_delta == 0.30
+    assert bet.max_stable_regressions == 1
+    agg = grade_aggregate_bet(bet, cand, base)
+    # subset: aaa F->T, bbb F->F, ddd T->T => base 1/3, cand 2/3, delta +1/3
+    assert abs(agg["mean_delta"] - (2 / 3 - 1 / 3)) < 1e-9
+    assert agg["delta_held"] is True
+    # run-wide stable regressions: ccc, eee => 2 > 1 predicted
+    assert agg["stable_regressions"] == ["LME::s::ccc", "LME::s::eee"]
+    assert agg["regressions_held"] is False
+    assert parse_aggregate_bet(sample_pred) is None  # no machine block
+
+    # cross-iteration noise filter: a task that already oscillates across
+    # prior iters must not be charged against the regression bound.
+    matrix_tasks = {
+        "LME::s::ccc": {"iter_000": 1.0, "iter_001": 1.0, "iter_002": 1.0},
+        "LME::s::eee": {"iter_000": 1.0, "iter_001": 0.0, "iter_002": 1.0},
+    }
+    assert historically_unstable_tasks(matrix_tasks) == {"LME::s::eee"}
+    agg2 = grade_aggregate_bet(bet, cand, base, history_unstable={"LME::s::eee"})
+    assert agg2["stable_regressions"] == ["LME::s::ccc"]
+    assert agg2["history_unstable_regressions"] == ["LME::s::eee"]
+    assert agg2["regressions_held"] is True  # 1 counted <= 1 predicted
+    print(render_aggregate_grade(5, agg))
     print("\nself-test OK")

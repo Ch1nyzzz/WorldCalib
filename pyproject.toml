@@ -5,18 +5,26 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "worldcalib"
 version = "0.1.0"
-description = "Baseline LOCOMO + LongMemEval runners, carved out of Optimizer1 as a playground for world-model calibration research."
+description = "Belief-calibrated scaffold optimization across the WorldCalib paper benchmarks."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "httpx>=0.27",
-  "PyYAML>=6.0",
   "mcp>=1.0",
   "openai>=1.40",
 ]
 
 [project.optional-dependencies]
+gaia = [
+  "beautifulsoup4>=4.12",
+  "datasets>=3.0",
+  "duckduckgo-search>=6.0",
+  "openpyxl>=3.1",
+  "requests>=2.32",
+  "xlrd>=2.0",
+]
 dev = [
+  "build>=1.2",
   "pytest>=8.0",
 ]
 
@@ -31,6 +39,10 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "worldcalib.prompts" = ["**/*.md"]
+"worldcalib.benchmarks.appworld" = ["*.json"]
+"worldcalib.benchmarks.spider2" = ["*.json"]
+"worldcalib.benchmarks.tb2" = ["*.json"]
+"worldcalib.benchmarks.toolathlon" = ["*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,6 +1,6 @@
 ---
 name: worldcalib-proposer-tb2-base-core
-description: Shared NON-calibration proposer contract for the Terminal-Bench 2.0 terminus-2 harness agent — objective (mean pass@1 over repeats), generalization rules, search space, workflow (no calibration step), evidence interface (default + organized MODE blocks), quality gate, edit scope. Included by both the tb2_calib and tb2_nowmc arms via INCLUDE; the calib arm layers _calib_addon.md on top. The Terminal-Bench surface is spliced ahead of this fragment.
+description: Shared non-calibration proposer contract for the Terminal-Bench 2.0 harness. Included by both arms; the calibrated arm layers shared/_calib_addon.md on top.
 ---
 
 ## Objective
@@ -95,7 +95,6 @@ failure.
 
 ## Evidence interface
 
-<!-- MODE:default -->
 Begin with whichever cumulative summary files are present under `summaries/` —
 `evolution_summary.jsonl` (the full event history) and `best_candidates.json`
 (the current quality frontier). If no `summaries/` directory is provided this
@@ -103,64 +102,6 @@ run, work directly from the raw `reference_iterations/iter_NNN/` bundles instead
 Either way, inspect raw `reference_iterations/iter_NNN/` bundles and `traces/`
 files selectively to validate the failure mode and the source change. Do not
 infer a mechanism from summaries alone.
-<!-- END MODE:default -->
-<!-- MODE:organized -->
-Read `state.md` first for orientation — it is a current state snapshot only, not
-evidence, not diagnosis, not a plan. Then use the `runstore-tools` MCP server to
-inspect candidate outcomes, iteration comparisons, task histories, traces, and
-modifications before opening raw files. Use the tool results to decide which raw
-`reference_iterations/` and `traces/` files to read for verification and concrete
-excerpts. Cumulative summary files are not provided in this mode.
-
-The `runstore-tools` MCP server exposes the following (every name is prefixed
-`mcp__runstore-tools__`). Query these before opening raw files:
-- artifact tools — `runstore_artifact_list` / `_get` / `_search`: list, fetch, or
-  search the raw stored artifacts.
-- fact tools:
-  - `runstore_fact_candidate_outcome` — a candidate's average_score and per-task scores.
-  - `runstore_fact_compare_iterations` — score and candidate differences between two iterations.
-  - `runstore_fact_modification` — the source diff a candidate made.
-  - `runstore_fact_trace` — one task's trajectory summary for a candidate.
-  - `runstore_fact_task_history` — how one task's score evolved across iterations.
-  - `runstore_fact_file_history` — how one source file changed across candidates.
-  - `runstore_fact_proposal` / `runstore_fact_proposer_call` — a candidate's recorded
-    hypothesis and changes / the proposer session that produced it.
-  - `runstore_fact_state` — current run-state snapshot.
-- link (provenance) tools:
-  - `runstore_link_explain_proposal` — a candidate's chain: its outcome plus the tasks
-    it improved (breakthrough) and the tasks it regressed (regression).
-  - `runstore_link_explain_iteration` — one iteration consolidated: proposer call +
-    modification + outcome + links.
-  - `runstore_link_chain_task` — one task across iterations: eval results → traces →
-    the modifications that produced them.
-  - `runstore_link_for` — raw evidence-graph links filtered by source/target/relation.
-
-The `worldcalib-traces` MCP server adds semantic search over historical iter
-diffs (the SQL `runstore_fact_*` tools only support exact-id lookups):
-- `mcp__worldcalib-traces__trace_similar(diff_or_query, k?)` — find past iters
-  whose candidate diff is semantically closest to a natural-language description
-  or a candidate diff you are considering. Useful to avoid re-trying mechanisms
-  that already failed and to surface non-obvious prior attempts.
-<!-- END MODE:organized -->
-<!-- MODE:organized-no-state -->
-Use the `runstore-tools` MCP server first to inspect candidate outcomes,
-iteration comparisons, task histories, traces, and modifications before opening
-raw files. This organized run intentionally does not provide `state.md`; do not
-look for it. Use the tool results to decide which raw `reference_iterations/` and
-`traces/` files to read for verification and concrete excerpts. Cumulative
-summary files are not provided in this mode. The `runstore-tools` and
-`worldcalib-traces` MCP servers expose the same tools described in the organized
-mode above.
-<!-- END MODE:organized-no-state -->
-<!-- MODE:organized-summaries -->
-Read `state.md` first for orientation — a current state snapshot only. Then use
-the `runstore-tools` MCP server to inspect candidate outcomes, iteration
-comparisons, task histories, traces, and modifications before opening raw files.
-Cumulative summary files are also available in this ablation; treat them only as
-orientation — evidence claims should be grounded in RunStore tool results or raw
-trace/reference excerpts. The `runstore-tools` and `worldcalib-traces` MCP
-servers expose the same tools described in the organized mode above.
-<!-- END MODE:organized-summaries -->
 
 ## Hard rules (read before editing)
 

@@ -10,7 +10,7 @@ from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Iterator
 
-from worldcalib.memory.scaffolds import build_memory_scaffold
+from worldcalib.benchmarks.memory.scaffolds import build_memory_scaffold
 from worldcalib.scaffolds.base import MemoryScaffold
 
 
@@ -22,7 +22,7 @@ SOURCE_PROJECT_PATH_KEYS = (
 
 SOURCE_SCAFFOLD_CLASSES = {
     "memgpt_source": (
-        "worldcalib.memory.scaffolds.memgpt_scaffold",
+        "worldcalib.benchmarks.memory.scaffolds.memgpt_scaffold",
         "MemGPTSourceScaffold",
     ),
 }
@@ -31,29 +31,22 @@ SOURCE_SCAFFOLD_CLASSES = {
 def load_candidate_scaffold(candidate: dict[str, Any], *, project_root: Path) -> MemoryScaffold:
     """Instantiate a memory scaffold from pending_eval candidate metadata."""
 
-    if candidate.get("kind") == "agent":
-        # Agent scaffolds are agentrl BaseClient subclasses, loaded separately.
-        from worldcalib.agentic.backends.agentbench.dynamic import (
-            load_candidate_agent_scaffold,
+    if candidate.get("kind") == "gaia_agent":
+        # GAIA scaffolds are FC-loop policies (solve_task), loaded separately.
+        from worldcalib.benchmarks.gaia.dynamic import (
+            load_candidate_gaia_scaffold,
         )
 
-        return load_candidate_agent_scaffold(candidate, project_root=project_root)
+        return load_candidate_gaia_scaffold(candidate, project_root=project_root)
 
-    if candidate.get("kind") == "tau2_agent":
-        # tau2 scaffolds are LLMAgent factories, loaded separately (agentrl-free).
-        from worldcalib.agentic.backends.tau2.dynamic import (
-            load_candidate_tau2_scaffold,
+    if candidate.get("kind") == "spider2_agent":
+        # Spider2 scaffolds are single-shot text-to-SQL policies (solve_task),
+        # loaded separately.
+        from worldcalib.benchmarks.spider2.dynamic import (
+            load_candidate_spider2_scaffold,
         )
 
-        return load_candidate_tau2_scaffold(candidate, project_root=project_root)
-
-    if candidate.get("kind") == "arc_solver":
-        # ARC solvers are single-shot ArcScaffolds, loaded separately (agentrl-free).
-        from worldcalib.reasoning.arc_dynamic import (
-            load_candidate_arc_scaffold,
-        )
-
-        return load_candidate_arc_scaffold(candidate, project_root=project_root)
+        return load_candidate_spider2_scaffold(candidate, project_root=project_root)
 
     src_path = str(project_root / "src")
     if src_path not in sys.path:

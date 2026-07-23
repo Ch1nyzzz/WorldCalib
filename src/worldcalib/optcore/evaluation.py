@@ -1,22 +1,7 @@
-"""Shared self-distill evaluation helpers.
+"""Shared evaluation helpers for self-distilled agent-policy benchmarks.
 
-The two backend evaluation runners (agentbench async ``SampleWorkflow`` vs tau2
-``ThreadPoolExecutor`` + ``run_simulation``) build episodes differently, but the
-**failed-episode row** and the **candidate summary** are identical in shape.
-Those two pieces live here so both runners delegate to one implementation:
-
-- :func:`build_error_task_result` — the score-0 ``TaskResult`` a runner emits
-  when a single episode raises (isolated so one bad episode never crashes the
-  batch).
-- :func:`summarize_candidate` — aggregate ``TaskResult`` rows into a
-  :class:`CandidateResult`, write ``candidate_results/<id>.json`` (with a
-  per-category ``score_breakdown``), and return the candidate.
-
-Token totals are computed uniformly from ``TaskResult.prompt_tokens`` /
-``completion_tokens``: agentbench rows carry 0 tokens and therefore sum to 0
-with no special-casing, while tau2 rows carry real counts.
-
-Kept ``agentrl`` / ``tau2`` free.
+The helpers isolate episode failures and aggregate per-task records into the
+common CandidateResult schema used by GAIA and Spider2.
 """
 
 from __future__ import annotations

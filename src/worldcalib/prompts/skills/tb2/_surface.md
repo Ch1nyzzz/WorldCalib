@@ -1,6 +1,6 @@
 ---
 name: worldcalib-proposer-tb2-surface
-description: Terminal-Bench 2.0 backend contract for the terminus-2 harness proposer — what the editable snapshot contains, the per-trial evidence Harbor writes, the only hard constraints (solver model LOCKED; tasks/verifier OFF-LIMITS; gold is evidence but must never be transmitted into the agent), and the pending_eval output contract. No failure-mode taxonomy and no mechanism suggestions: the proposer analyses the evidence and patches the harness itself. Spliced ahead of the shared tb2 base core; shared by both the tb2_calib and tb2_nowmc arms.
+description: Terminal-Bench 2.0 backend contract for the terminus-2 harness proposer — what the editable snapshot contains, the per-trial evidence Harbor writes, the only hard constraints (solver model LOCKED; tasks/verifier OFF-LIMITS; gold is evidence but must never be transmitted into the agent), and the pending_eval output contract. The proposer analyses the evidence and patches the harness itself. Spliced ahead of the shared tb2 base core; shared by both the tb2_calib and tb2_nowmc arms.
 ---
 
 ## What you are evolving

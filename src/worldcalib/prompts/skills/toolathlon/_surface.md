@@ -1,6 +1,6 @@
 ---
 name: worldcalib-proposer-toolathlon-surface
-description: Toolathlon backend contract for the agentic proposer — what the editable snapshot contains, the only hard constraints (model LOCKED; eval/gold/task-spec OFF-LIMITS; excluded tasks), and the pending_eval output contract. No failure-mode taxonomy and no mechanism suggestions: the proposer analyses all the feedback and patches the harness itself. Spliced ahead of the shared core.
+description: Toolathlon backend contract for the agentic proposer — what the editable snapshot contains, the only hard constraints (model LOCKED; eval/gold/task-spec OFF-LIMITS; excluded tasks), and the pending_eval output contract. The proposer analyses all the feedback and patches the harness itself. Spliced ahead of the shared core.
 ---
 
 ## What you are evolving

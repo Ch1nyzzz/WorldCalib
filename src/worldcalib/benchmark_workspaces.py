@@ -1,13 +1,15 @@
-"""Benchmark-scoped source workspaces for proposer optimization."""
+"""Benchmark-scoped source snapshots for proposer optimization."""
 
 from __future__ import annotations
 
 import shutil
 from dataclasses import dataclass
+from importlib.resources import files
+from importlib.resources.abc import Traversable
 from pathlib import Path
 
 
-MINIMAL_BENCHMARK_PACKAGE_INIT = (
+MINIMAL_PACKAGE_INIT = (
     '"""Benchmark-scoped candidate package."""\n\n'
     "__all__: list[str] = []\n"
 )
@@ -15,7 +17,7 @@ MINIMAL_BENCHMARK_PACKAGE_INIT = (
 
 @dataclass(frozen=True)
 class BenchmarkWorkspaceSpec:
-    """Source files that define one benchmark's editable proposer workspace."""
+    """Files that define one benchmark's editable proposer workspace."""
 
     benchmark: str
     source_files: tuple[str, ...]
@@ -23,129 +25,94 @@ class BenchmarkWorkspaceSpec:
 
     @property
     def allowed_memomemo_modules(self) -> tuple[str, ...]:
-        """Top-level worldcalib modules candidates may import from this snapshot."""
-
         modules: set[str] = set()
         for rel in self.source_files:
             parts = Path(rel).parts
-            if not parts:
+            if not parts or parts[0] == "__init__.py":
                 continue
-            top = parts[0]
-            if top == "__init__.py":
-                continue
-            if top.endswith(".py"):
-                modules.add(top.removesuffix(".py"))
-            else:
-                modules.add(top)
+            modules.add(
+                parts[0].removesuffix(".py")
+                if parts[0].endswith(".py")
+                else parts[0]
+            )
         return tuple(sorted(modules))
+
+
+_MEMORY_SOURCE_FILES = (
+    "__init__.py",
+    "dynamic.py",
+    "metrics.py",
+    "model.py",
+    "schemas.py",
+    "source_base.py",
+    "upstream.py",
+    "scaffolds/__init__.py",
+    "scaffolds/base.py",
+    "benchmarks/__init__.py",
+    "benchmarks/memory/__init__.py",
+    "benchmarks/memory/locomo.py",
+    "benchmarks/memory/scaffolds/__init__.py",
+    "benchmarks/memory/scaffolds/bm25_scaffold.py",
+    "benchmarks/memory/scaffolds/memgpt_scaffold.py",
+    "utils/__init__.py",
+    "utils/text.py",
+)
 
 
 LOCOMO_WORKSPACE_SPEC = BenchmarkWorkspaceSpec(
     benchmark="locomo",
     primary_source_file="scaffolds/base.py",
-    source_files=(
-        "__init__.py",
-        "dynamic.py",
-        "metrics.py",
-        "model.py",
-        "schemas.py",
-        "source_base.py",
-        "upstream.py",
-        "scaffolds/__init__.py",
-        "scaffolds/base.py",
-        "memory/__init__.py",
-        "memory/locomo.py",
-        "memory/scaffolds/__init__.py",
-        "memory/scaffolds/bm25_scaffold.py",
-        "memory/scaffolds/memgpt_scaffold.py",
-        "utils/__init__.py",
-        "utils/text.py",
-    ),
+    source_files=_MEMORY_SOURCE_FILES,
 )
 
 
 LONGMEMEVAL_WORKSPACE_SPEC = BenchmarkWorkspaceSpec(
     benchmark="longmemeval",
     primary_source_file="scaffolds/base.py",
-    source_files=(
-        *LOCOMO_WORKSPACE_SPEC.source_files,
-        "memory/longmemeval.py",
-    ),
+    source_files=(*_MEMORY_SOURCE_FILES, "benchmarks/memory/longmemeval.py"),
 )
 
 
-AGENTBENCH_WORKSPACE_SPEC = BenchmarkWorkspaceSpec(
-    benchmark="agentbench",
-    primary_source_file="agentic/backends/agentbench/seed_passthrough.py",
+GAIA_WORKSPACE_SPEC = BenchmarkWorkspaceSpec(
+    benchmark="gaia",
+    primary_source_file="benchmarks/gaia/seed_passthrough.py",
     source_files=(
-        *LOCOMO_WORKSPACE_SPEC.source_files,
+        *_MEMORY_SOURCE_FILES,
         "optcore/__init__.py",
         "optcore/scaffold_base.py",
-        "agentic/__init__.py",
-        "agentic/backends/__init__.py",
-        "agentic/backends/agentbench/__init__.py",
-        "agentic/backends/agentbench/base.py",
-        "agentic/backends/agentbench/seed_passthrough.py",
+        "benchmarks/gaia/__init__.py",
+        "benchmarks/gaia/base.py",
+        "benchmarks/gaia/seed_passthrough.py",
+        "benchmarks/gaia/llm.py",
+        "benchmarks/gaia/tools/__init__.py",
+        "benchmarks/gaia/tools/file_read.py",
+        "benchmarks/gaia/tools/url_fetch.py",
+        "benchmarks/gaia/tools/web_search.py",
+        "benchmarks/gaia/tools/python_exec.py",
     ),
 )
 
-TAU2_WORKSPACE_SPEC = BenchmarkWorkspaceSpec(
-    benchmark="tau2",
-    primary_source_file="agentic/backends/tau2/seed_passthrough.py",
+
+SPIDER2_WORKSPACE_SPEC = BenchmarkWorkspaceSpec(
+    benchmark="spider2",
+    primary_source_file="benchmarks/spider2/seed_passthrough.py",
     source_files=(
-        *LOCOMO_WORKSPACE_SPEC.source_files,
+        *_MEMORY_SOURCE_FILES,
         "optcore/__init__.py",
         "optcore/scaffold_base.py",
-        "agentic/__init__.py",
-        "agentic/backends/__init__.py",
-        "agentic/backends/tau2/__init__.py",
-        "agentic/backends/tau2/base.py",
-        "agentic/backends/tau2/seed_passthrough.py",
+        "benchmarks/spider2/__init__.py",
+        "benchmarks/spider2/base.py",
+        "benchmarks/spider2/seed_passthrough.py",
+        "benchmarks/spider2/llm.py",
     ),
 )
 
 
-ARC_WORKSPACE_SPEC = BenchmarkWorkspaceSpec(
-    benchmark="arc_agi2",
-    primary_source_file="reasoning/arc_scaffolds/seed_passthrough.py",
-    source_files=(
-        *LOCOMO_WORKSPACE_SPEC.source_files,
-        "optcore/__init__.py",
-        "optcore/scaffold_base.py",
-        "reasoning/__init__.py",
-        "reasoning/arc_scaffolds/__init__.py",
-        "reasoning/arc_scaffolds/base.py",
-        "reasoning/arc_scaffolds/seed_passthrough.py",
-    ),
-)
-
-
-SWEBENCH_WORKSPACE_SPEC = BenchmarkWorkspaceSpec(
-    benchmark="swebench",
-    primary_source_file="coding/swebench.py",
+TOOLATHLON_WORKSPACE_SPEC = BenchmarkWorkspaceSpec(
+    benchmark="toolathlon",
+    primary_source_file="benchmarks/toolathlon/runner.py",
     source_files=(
         "__init__.py",
-        "benchmark_workspaces.py",
-        "claude_runner.py",
-        "coding/__init__.py",
-        "coding/swebench.py",
-        "coding/swebench_optimizer.py",
-        "model.py",
-        "optimizer.py",
-        "pareto.py",
-        "post_eval.py",
-        "proposer_prompt.py",
-        "schemas.py",
-    ),
-)
-
-
-TERMINUS_WORKSPACE_SPEC = BenchmarkWorkspaceSpec(
-    benchmark="terminus",
-    primary_source_file="terminus.py",
-    source_files=(
-        "__init__.py",
-        "benchmark_tasks.py",
         "benchmark_workspaces.py",
         "claude_runner.py",
         "model.py",
@@ -154,51 +121,91 @@ TERMINUS_WORKSPACE_SPEC = BenchmarkWorkspaceSpec(
         "post_eval.py",
         "proposer_prompt.py",
         "schemas.py",
-        "terminus.py",
-        "terminus_optimizer.py",
+        "optcore/__init__.py",
+        "optcore/scaffold_base.py",
+        "benchmarks/__init__.py",
+        "benchmarks/toolathlon/__init__.py",
+        "benchmarks/toolathlon/data.py",
+        "benchmarks/toolathlon/runner.py",
+        "benchmarks/toolathlon/optimizer.py",
     ),
 )
 
 
-GRAPH_COLOURING_WORKSPACE_SPEC = BenchmarkWorkspaceSpec(
-    benchmark="graph_colouring",
-    primary_source_file="graph_colouring.py",
+APPWORLD_WORKSPACE_SPEC = BenchmarkWorkspaceSpec(
+    benchmark="appworld",
+    primary_source_file="benchmarks/appworld/runner.py",
     source_files=(
         "__init__.py",
-        "benchmark_tasks.py",
         "benchmark_workspaces.py",
         "claude_runner.py",
-        "graph_colouring.py",
-        "graph_colouring_optimizer.py",
         "model.py",
         "optimizer.py",
         "pareto.py",
         "post_eval.py",
         "proposer_prompt.py",
         "schemas.py",
+        "optcore/__init__.py",
+        "optcore/scaffold_base.py",
+        "benchmarks/__init__.py",
+        "benchmarks/appworld/__init__.py",
+        "benchmarks/appworld/data.py",
+        "benchmarks/appworld/runner.py",
+        "benchmarks/appworld/optimizer.py",
     ),
 )
+
+
+TB2_WORKSPACE_SPEC = BenchmarkWorkspaceSpec(
+    benchmark="tb2",
+    primary_source_file="benchmarks/tb2/tb2.py",
+    source_files=(
+        "__init__.py",
+        "benchmark_workspaces.py",
+        "claude_runner.py",
+        "model.py",
+        "optimizer.py",
+        "pareto.py",
+        "post_eval.py",
+        "proposer_prompt.py",
+        "schemas.py",
+        "benchmarks/__init__.py",
+        "benchmarks/tb2/__init__.py",
+        "benchmarks/tb2/data.py",
+        "benchmarks/tb2/tb2.py",
+        "benchmarks/tb2/tb2_optimizer.py",
+        "runners/__init__.py",
+        "runners/harbor.py",
+    ),
+)
+
+
+def package_source_root() -> Traversable:
+    """Return the installed worldcalib package through importlib.resources."""
+
+    return files("worldcalib")
 
 
 def copy_benchmark_project_source(
     *,
-    project_root: Path,
     dest_pkg: Path,
     spec: BenchmarkWorkspaceSpec,
+    source_pkg: Traversable | None = None,
 ) -> tuple[str, ...]:
-    """Copy exactly the source files declared by a benchmark workspace spec."""
+    """Copy exactly the package resources declared by a workspace spec."""
 
-    source_pkg = project_root / "src" / "worldcalib"
+    root = source_pkg or package_source_root()
     copied: list[str] = []
     for rel in spec.source_files:
-        src = source_pkg / rel
-        if not src.exists():
-            raise FileNotFoundError(f"benchmark source file does not exist: {src}")
+        src = root.joinpath(*Path(rel).parts)
+        if not src.is_file():
+            raise FileNotFoundError(f"benchmark package resource is missing: {rel}")
         dest = dest_pkg / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
         if Path(rel).parts == ("__init__.py",):
-            dest.write_text(MINIMAL_BENCHMARK_PACKAGE_INIT, encoding="utf-8")
+            dest.write_text(MINIMAL_PACKAGE_INIT, encoding="utf-8")
         else:
-            shutil.copy2(src, dest)
+            with src.open("rb") as source_handle, dest.open("wb") as dest_handle:
+                shutil.copyfileobj(source_handle, dest_handle)
         copied.append(rel)
     return tuple(copied)

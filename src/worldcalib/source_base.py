@@ -7,9 +7,9 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
+from worldcalib.paths import runtime_root
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_SOURCE_BASE_DIR = PROJECT_ROOT / "runs" / "source_base_memory"
+
 BUILD_FINGERPRINT_VERSION = "source-base-v1"
 
 
@@ -18,9 +18,10 @@ def source_base_enabled(extra: Mapping[str, Any]) -> bool:
 
 
 def source_base_sample_dir(scaffold_name: str, sample_id: str, extra: Mapping[str, Any]) -> Path:
-    root = Path(str(extra.get("source_base_dir") or extra.get("base_memory_dir") or DEFAULT_SOURCE_BASE_DIR))
+    default_root = runtime_root() / "runs" / "source_base_memory"
+    root = Path(str(extra.get("source_base_dir") or extra.get("base_memory_dir") or default_root))
     if not root.is_absolute():
-        root = PROJECT_ROOT / root
+        root = runtime_root() / root
     return root / scaffold_name / sample_id
 
 
@@ -107,7 +108,8 @@ def _build_relevant_config(extra: Mapping[str, Any]) -> dict[str, Any]:
 def _file_digest(path: Path) -> dict[str, str]:
     if not path.exists():
         return {"path": str(path), "sha256": "missing"}
+    work_dir = runtime_root()
     return {
-        "path": str(path.relative_to(PROJECT_ROOT) if path.is_relative_to(PROJECT_ROOT) else path),
+        "path": str(path.relative_to(work_dir) if path.is_relative_to(work_dir) else path),
         "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
     }

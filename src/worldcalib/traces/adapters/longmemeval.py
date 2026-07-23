@@ -38,6 +38,19 @@ def _build_documents(retrieved: Any) -> list[dict[str, Any]]:
     ]
 
 
+# Diagnostic metadata records why a QA episode failed. Surfacing status, error,
+# and evaluation_error makes runtime crashes distinguishable from valid score-0
+# episodes.
+_DIAGNOSTIC_KEYS = ("status", "error", "evaluation_error")
+
+
+def _diagnostic_fields(task: dict[str, Any]) -> dict[str, Any]:
+    metadata = task.get("metadata")
+    if not isinstance(metadata, dict):
+        return {}
+    return {key: metadata[key] for key in _DIAGNOSTIC_KEYS if metadata.get(key) is not None}
+
+
 def _build_trace_for_qa(
     *,
     benchmark: str,
@@ -73,6 +86,7 @@ def _build_trace_for_qa(
         "passed": bool(task.get("passed")),
         "prompt_tokens": task.get("prompt_tokens"),
         "completion_tokens": task.get("completion_tokens"),
+        **_diagnostic_fields(task),
     }
 
     return Trace(
