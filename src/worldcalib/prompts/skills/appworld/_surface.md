@@ -1,6 +1,6 @@
 ---
 name: worldcalib-proposer-appworld-surface
-description: AppWorld backend contract for the interactive-coding-agent proposer — what the editable agent is, the only hard constraints (solver model LOCKED; evaluator/ground-truth OFF-LIMITS; keep the file worldcalib-free; preserve the solve() return contract), the staged raw evidence, and the pending_eval output contract. No failure-mode taxonomy and no mechanism suggestions: the proposer analyses all the feedback and edits the agent itself. Spliced ahead of the shared base core; shared by both the appworld_calib and appworld_nowmc arms.
+description: AppWorld backend contract for the interactive-coding-agent proposer — what the editable agent is, the only hard constraints (solver model LOCKED; evaluator/ground-truth OFF-LIMITS; keep the file worldcalib-free; preserve the solve() return contract), the staged raw evidence, and the pending_eval output contract. The proposer analyses all the feedback and edits the agent itself. Spliced ahead of the shared base core; shared by both the appworld_calib and appworld_nowmc arms.
 ---
 
 ## What you are evolving

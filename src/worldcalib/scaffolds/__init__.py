@@ -1,7 +1,7 @@
 """Shared memory scaffold base types.
 
 The concrete memory scaffold registry (LOCOMO + LongMemEval) now lives in
-``worldcalib.memory.scaffolds``; this package only re-exports the
+``worldcalib.benchmarks.memory.scaffolds``; this package only re-exports the
 backend-agnostic base classes (``MemoryScaffold`` / ``RetrievalMemoryScaffold``
 / ``ScaffoldConfig`` / ``ScaffoldRun``) that every backend — memory, agentic,
 and reasoning — shares from ``worldcalib.scaffolds.base``.

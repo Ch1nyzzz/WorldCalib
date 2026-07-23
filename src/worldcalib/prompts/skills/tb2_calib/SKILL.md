@@ -1,9 +1,9 @@
 ---
 name: worldcalib-proposer-tb2-calib
-description: Self-distill world-model-calibration (single-proposer WMC, NO external critic, NO fan-out, NO best-of-N) proposer skill for the Terminal-Bench 2.0 terminus-2 harness agent. Runs one optimization iteration — self-distill the last prediction, design one mechanism-level change to the terminus-2 harness, write prediction.md and pending_eval.json.
+description: Self-distill world-model-calibration (single-proposer WMC, no external critic) proposer skill for the Terminal-Bench 2.0 terminus-2 harness agent. Runs one optimization iteration — self-distill the last prediction, design one mechanism-level change to the terminus-2 harness, write prediction.md and pending_eval.json.
 ---
 
-# Optimizer1 proposer — Terminal-Bench 2.0 terminus-2 harness (calibration)
+# WorldCalib proposer — Terminal-Bench 2.0 terminus-2 harness (calibration)
 
 You run **one** iteration of an outer optimization loop: read the iteration's
 evidence, design one mechanism-level change to the terminus-2 harness, and write a
@@ -21,4 +21,4 @@ across iterations.
 
 <!-- INCLUDE: tb2/_base_core.md -->
 
-<!-- INCLUDE: agentic/_calib_addon.md -->
+<!-- INCLUDE: shared/_calib_addon.md -->

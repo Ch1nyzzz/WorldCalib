@@ -1,6 +1,6 @@
 ---
 name: worldcalib-proposer-tb2-surface
-description: Terminal-Bench 2.0 backend contract for the terminus-2 harness proposer — what the editable snapshot contains, the per-trial evidence Harbor writes, the only hard constraints (solver model LOCKED; tasks/verifier OFF-LIMITS; gold is evidence but must never be transmitted into the agent), and the pending_eval output contract. No failure-mode taxonomy and no mechanism suggestions: the proposer analyses the evidence and patches the harness itself. Spliced ahead of the shared tb2 base core; shared by both the tb2_calib and tb2_nowmc arms.
+description: Terminal-Bench 2.0 backend contract for the terminus-2 harness proposer — what the editable snapshot contains, the per-trial evidence Harbor writes, the only hard constraints (solver model LOCKED; tasks/verifier OFF-LIMITS; gold is evidence but must never be transmitted into the agent), and the pending_eval output contract. The proposer analyses the evidence and patches the harness itself. Spliced ahead of the shared tb2 base core; shared by both the tb2_calib and tb2_nowmc arms.
 ---
 
 ## What you are evolving
@@ -34,14 +34,20 @@ Each task's outcome record carries:
 - `rewards` / `k` — the per-trial rewards and how many trials ran.
 
 Harbor's raw per-trial files are staged for you to read directly under
-`reference_iterations/iter_NNN/dumps/<candidate>/<task>/` — and, for the iter you
-built on, `base_eval/dumps/<candidate>/<task>/`:
+`reference_iterations/iter_NNN/dumps/<candidate>/<task>/` — plus, for the iter you
+built on, `base_eval/dumps/<candidate>/<task>/`, and for the seed baseline,
+`seed_eval/{eval,dumps}/` (its eval record and per-task dumps, same layout). Each
+task's dump dir holds the files flat (no subdirectories):
 
-- `verifier/test-stdout.txt` — the verifier's full test log.
-- `verifier/ctrf.json` — the same results, structured per test.
-- `agent/trajectory.json` — the full ATIF trajectory.
-- `agent/terminus_2.pane` — the final terminal pane.
+- `test-stdout.txt` — the verifier's full test log.
+- `ctrf.json` — the same results, structured per test.
+- `trajectory.json` — the full ATIF trajectory.
+- `terminus_2.pane` — the final terminal pane.
+- `exception.txt` — present only when the trial crashed before the verifier ran.
 - `trial.log` — Harbor's own log for the trial.
+
+A file staged as `<name>.tail.txt` is an oversized original truncated to its
+tail, with a header saying so.
 
 Diagnose from these and from the harness source that produced the behavior; it is
 all white-box. If the evidence for a claim is not in front of you, say the evidence

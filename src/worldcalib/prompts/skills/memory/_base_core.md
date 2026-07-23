@@ -1,6 +1,6 @@
 ---
 name: worldcalib-proposer-memory-base-core
-description: Shared NON-calibration proposer contract for memory QA policies — objective, generalization rules (incl proposal-level guardrails), search space, workflow (no calibration step), evidence interface, hard rules, quality gate, edit scope. Included by every per-benchmark memory skill (both arms) via INCLUDE; the calib arm layers memory/_calib_addon.md on top. The memory surface is spliced ahead of this fragment.
+description: Shared non-calibration proposer contract for memory QA policies. Included by LoCoMo and LongMemEval; calibrated arms layer shared/_calib_addon.md on top.
 ---
 
 ## Objective

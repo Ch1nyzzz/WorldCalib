@@ -1,0 +1,970 @@
+{
+  "train": [
+    "add-bibtex",
+    "cooking-guidance",
+    "detect-revised-terms",
+    "dietary-health",
+    "email-paper-homepage",
+    "find-alita-paper",
+    "gdp-cr5-analysis",
+    "git-bug-hunt",
+    "git-repo",
+    "identify-all-songs",
+    "imagenet",
+    "interview-report",
+    "investment-decision-analysis",
+    "invoice-org",
+    "ipad-edu-price",
+    "latex-prompt-box",
+    "logical-datasets-collection",
+    "mrbeast-analysis",
+    "nhl-b2b-analysis",
+    "nvidia-market",
+    "nvidia-stock-analysis",
+    "oil-price",
+    "personal-website-construct",
+    "ppt-analysis",
+    "quantitative-financial-analysis",
+    "set-conf-cr-ddl",
+    "sla-timeout-monitor",
+    "student-interview",
+    "sync-todo-to-readme",
+    "task-tracker",
+    "train-ticket-plan",
+    "update-material-inventory",
+    "wandb-best-score",
+    "wandb-shortest-length",
+    "yahoo-analysis",
+    "youtube-repo"
+  ],
+  "test": [
+    "ab-testing",
+    "academic-pdf-report",
+    "academic-warning",
+    "apply-phd-email",
+    "arrange-workspace",
+    "canvas-arrange-exam",
+    "canvas-art-manager",
+    "canvas-art-quiz",
+    "canvas-do-quiz",
+    "canvas-homework-grader-python",
+    "canvas-list-test",
+    "canvas-new-students-notification",
+    "canvas-submit-late-work",
+    "course-assistant",
+    "course-schedule",
+    "courses-ta-hws",
+    "cvpr-research",
+    "dataset-license-issue",
+    "excel-data-transformation",
+    "excel-market-research",
+    "experiments-recordings",
+    "fillout-online-forms",
+    "filter-low-selling-products",
+    "flagged-transactions",
+    "game-statistics",
+    "git-milestone",
+    "hk-top-conf",
+    "huggingface-upload",
+    "inter-final-performance-analysis",
+    "inventory-sync",
+    "language-school",
+    "live-transactions",
+    "llm-training-dataset",
+    "machine-operating",
+    "meeting-assign",
+    "merge-hf-datasets",
+    "music-analysis",
+    "notion-find-job",
+    "notion-hr",
+    "notion-movies",
+    "notion-personal-website",
+    "paper-checker",
+    "price-comparison",
+    "privacy-desensitization",
+    "profile-update-online",
+    "reimbursement-form-filler",
+    "sales-accounting",
+    "search-ca-school",
+    "shopping-helper",
+    "stock-build-position",
+    "subway-planning",
+    "travel-exchange",
+    "trip-adviser",
+    "trip-itinerary-generator",
+    "university-course-selection",
+    "upenn-campus-route",
+    "verl-dataset",
+    "vlm-history-completer",
+    "woocommerce-customer-survey",
+    "woocommerce-new-product",
+    "woocommerce-new-welcome",
+    "woocommerce-product-recall",
+    "woocommerce-stock-alert",
+    "woocommerce-update-cover"
+  ],
+  "excluded": [
+    "k8s-deployment-cleanup",
+    "k8s-mysql",
+    "k8s-pr-preview-testing",
+    "k8s-redis-helm-upgrade",
+    "k8s-safety-audit",
+    "landing-task-reminder",
+    "payable-invoice-checker",
+    "travel-expense-reimbursement"
+  ],
+  "_meta": {
+    "source": "Toolathlon finalpool (108 tasks)",
+    "split": "app-disjoint (primary MCP server)",
+    "excluded_reason": "k8s: no cluster deployed; snowflake: placeholder creds (live-connection tasks only); plus baseline-dead tasks whose own preprocess/main.py crashes (Notion page-dup file missing, HuggingFace 403, wall-clock timeout) so no agent policy can ever pass them",
+    "counts": {
+      "total": 108,
+      "valid": 100,
+      "excluded": 8
+    },
+    "per_instance": {
+      "add-bibtex": {
+        "app": "scholarly",
+        "servers": [
+          "scholarly",
+          "playwright_with_chunk",
+          "filesystem",
+          "terminal",
+          "fetch"
+        ]
+      },
+      "cooking-guidance": {
+        "app": "howtocook",
+        "servers": [
+          "filesystem",
+          "howtocook"
+        ]
+      },
+      "detect-revised-terms": {
+        "app": "filesystem",
+        "servers": [
+          "filesystem",
+          "pdf-tools"
+        ]
+      },
+      "dietary-health": {
+        "app": "howtocook",
+        "servers": [
+          "filesystem",
+          "howtocook",
+          "excel",
+          "terminal"
+        ]
+      },
+      "email-paper-homepage": {
+        "app": "github",
+        "servers": [
+          "emails",
+          "github"
+        ]
+      },
+      "find-alita-paper": {
+        "app": "arxiv_local",
+        "servers": [
+          "arxiv_local",
+          "filesystem",
+          "scholarly"
+        ]
+      },
+      "gdp-cr5-analysis": {
+        "app": "google_sheet",
+        "servers": [
+          "google_sheet",
+          "playwright_with_chunk",
+          "fetch"
+        ]
+      },
+      "git-bug-hunt": {
+        "app": "git",
+        "servers": [
+          "git",
+          "terminal",
+          "filesystem",
+          "emails"
+        ]
+      },
+      "git-repo": {
+        "app": "github",
+        "servers": [
+          "github",
+          "filesystem",
+          "pdf-tools"
+        ]
+      },
+      "identify-all-songs": {
+        "app": "youtube-transcript",
+        "servers": [
+          "filesystem",
+          "youtube-transcript",
+          "playwright_with_chunk",
+          "fetch"
+        ]
+      },
+      "imagenet": {
+        "app": "filesystem",
+        "servers": [
+          "filesystem",
+          "pdf-tools"
+        ]
+      },
+      "interview-report": {
+        "app": "filesystem",
+        "servers": [
+          "filesystem",
+          "word"
+        ]
+      },
+      "investment-decision-analysis": {
+        "app": "yahoo-finance",
+        "servers": [
+          "yahoo-finance",
+          "google_sheet",
+          "excel",
+          "filesystem"
+        ]
+      },
+      "invoice-org": {
+        "app": "yahoo-finance",
+        "servers": [
+          "pdf-tools",
+          "filesystem",
+          "yahoo-finance",
+          "excel"
+        ]
+      },
+      "ipad-edu-price": {
+        "app": "yahoo-finance",
+        "servers": [
+          "yahoo-finance",
+          "playwright_with_chunk",
+          "fetch"
+        ]
+      },
+      "latex-prompt-box": {
+        "app": "arxiv-latex",
+        "servers": [
+          "filesystem",
+          "arxiv-latex",
+          "terminal"
+        ]
+      },
+      "logical-datasets-collection": {
+        "app": "scholarly",
+        "servers": [
+          "filesystem",
+          "scholarly",
+          "arxiv_local",
+          "pdf-tools",
+          "fetch"
+        ]
+      },
+      "mrbeast-analysis": {
+        "app": "youtube",
+        "servers": [
+          "youtube",
+          "filesystem",
+          "excel",
+          "youtube-transcript"
+        ]
+      },
+      "nhl-b2b-analysis": {
+        "app": "google_sheet",
+        "servers": [
+          "google_sheet",
+          "filesystem",
+          "terminal"
+        ]
+      },
+      "nvidia-market": {
+        "app": "yahoo-finance",
+        "servers": [
+          "yahoo-finance",
+          "filesystem",
+          "terminal",
+          "playwright_with_chunk",
+          "excel",
+          "fetch"
+        ]
+      },
+      "nvidia-stock-analysis": {
+        "app": "yahoo-finance",
+        "servers": [
+          "yahoo-finance",
+          "filesystem",
+          "terminal",
+          "excel"
+        ]
+      },
+      "oil-price": {
+        "app": "yahoo-finance",
+        "servers": [
+          "yahoo-finance",
+          "notion",
+          "filesystem",
+          "terminal"
+        ]
+      },
+      "personal-website-construct": {
+        "app": "github",
+        "servers": [
+          "memory",
+          "github"
+        ]
+      },
+      "ppt-analysis": {
+        "app": "pptx",
+        "servers": [
+          "pptx",
+          "filesystem",
+          "pdf-tools"
+        ]
+      },
+      "quantitative-financial-analysis": {
+        "app": "yahoo-finance",
+        "servers": [
+          "filesystem",
+          "yahoo-finance",
+          "google_sheet",
+          "notion",
+          "terminal"
+        ]
+      },
+      "set-conf-cr-ddl": {
+        "app": "google_calendar",
+        "servers": [
+          "emails",
+          "google_calendar"
+        ]
+      },
+      "sla-timeout-monitor": {
+        "app": "snowflake",
+        "servers": [
+          "emails",
+          "snowflake",
+          "filesystem",
+          "pdf-tools",
+          "terminal"
+        ]
+      },
+      "student-interview": {
+        "app": "google_calendar",
+        "servers": [
+          "emails",
+          "google_calendar"
+        ]
+      },
+      "sync-todo-to-readme": {
+        "app": "git",
+        "servers": [
+          "git",
+          "github"
+        ]
+      },
+      "task-tracker": {
+        "app": "github",
+        "servers": [
+          "github",
+          "notion"
+        ]
+      },
+      "train-ticket-plan": {
+        "app": "rail_12306",
+        "servers": [
+          "filesystem",
+          "rail_12306",
+          "terminal",
+          "fetch"
+        ]
+      },
+      "update-material-inventory": {
+        "app": "google_sheet",
+        "servers": [
+          "google_sheet",
+          "woocommerce"
+        ]
+      },
+      "wandb-best-score": {
+        "app": "wandb",
+        "servers": [
+          "wandb",
+          "filesystem",
+          "terminal"
+        ]
+      },
+      "wandb-shortest-length": {
+        "app": "wandb",
+        "servers": [
+          "wandb",
+          "filesystem",
+          "terminal",
+          "excel"
+        ]
+      },
+      "yahoo-analysis": {
+        "app": "yahoo-finance",
+        "servers": [
+          "yahoo-finance",
+          "filesystem",
+          "terminal"
+        ]
+      },
+      "youtube-repo": {
+        "app": "youtube",
+        "servers": [
+          "youtube",
+          "youtube-transcript",
+          "filesystem",
+          "fetch",
+          "github"
+        ]
+      },
+      "ab-testing": {
+        "app": "google-cloud",
+        "servers": [
+          "google-cloud",
+          "filesystem"
+        ]
+      },
+      "academic-pdf-report": {
+        "app": "playwright_with_chunk",
+        "servers": [
+          "playwright_with_chunk",
+          "excel",
+          "terminal",
+          "arxiv_local",
+          "pdf-tools",
+          "fetch"
+        ]
+      },
+      "academic-warning": {
+        "app": "google-cloud",
+        "servers": [
+          "google-cloud",
+          "excel",
+          "filesystem"
+        ]
+      },
+      "apply-phd-email": {
+        "app": "terminal",
+        "servers": [
+          "filesystem",
+          "memory",
+          "emails",
+          "terminal",
+          "pdf-tools"
+        ]
+      },
+      "arrange-workspace": {
+        "app": "terminal",
+        "servers": [
+          "filesystem",
+          "terminal",
+          "pdf-tools",
+          "excel"
+        ]
+      },
+      "canvas-arrange-exam": {
+        "app": "canvas",
+        "servers": [
+          "canvas",
+          "emails",
+          "memory",
+          "terminal"
+        ]
+      },
+      "canvas-art-manager": {
+        "app": "canvas",
+        "servers": [
+          "filesystem",
+          "canvas",
+          "terminal",
+          "emails"
+        ]
+      },
+      "canvas-art-quiz": {
+        "app": "canvas",
+        "servers": [
+          "filesystem",
+          "canvas",
+          "terminal"
+        ]
+      },
+      "canvas-do-quiz": {
+        "app": "canvas",
+        "servers": [
+          "memory",
+          "canvas"
+        ]
+      },
+      "canvas-homework-grader-python": {
+        "app": "canvas",
+        "servers": [
+          "canvas",
+          "filesystem",
+          "terminal",
+          "emails"
+        ]
+      },
+      "canvas-list-test": {
+        "app": "canvas",
+        "servers": [
+          "canvas",
+          "memory"
+        ]
+      },
+      "canvas-new-students-notification": {
+        "app": "terminal",
+        "servers": [
+          "filesystem",
+          "terminal",
+          "canvas"
+        ]
+      },
+      "canvas-submit-late-work": {
+        "app": "canvas",
+        "servers": [
+          "canvas",
+          "memory",
+          "filesystem",
+          "emails"
+        ]
+      },
+      "course-assistant": {
+        "app": "excel",
+        "servers": [
+          "excel",
+          "emails",
+          "filesystem",
+          "terminal"
+        ]
+      },
+      "course-schedule": {
+        "app": "excel",
+        "servers": [
+          "filesystem",
+          "memory",
+          "excel",
+          "pdf-tools",
+          "fetch"
+        ]
+      },
+      "courses-ta-hws": {
+        "app": "terminal",
+        "servers": [
+          "terminal",
+          "excel",
+          "filesystem"
+        ]
+      },
+      "cvpr-research": {
+        "app": "playwright_with_chunk",
+        "servers": [
+          "filesystem",
+          "fetch",
+          "playwright_with_chunk"
+        ]
+      },
+      "dataset-license-issue": {
+        "app": "huggingface",
+        "servers": [
+          "huggingface",
+          "github",
+          "terminal",
+          "fetch"
+        ]
+      },
+      "excel-data-transformation": {
+        "app": "excel",
+        "servers": [
+          "excel",
+          "filesystem",
+          "terminal"
+        ]
+      },
+      "excel-market-research": {
+        "app": "excel",
+        "servers": [
+          "excel",
+          "filesystem",
+          "terminal"
+        ]
+      },
+      "experiments-recordings": {
+        "app": "notion",
+        "servers": [
+          "notion",
+          "wandb",
+          "terminal",
+          "filesystem"
+        ]
+      },
+      "fillout-online-forms": {
+        "app": "playwright_with_chunk",
+        "servers": [
+          "playwright_with_chunk",
+          "memory",
+          "filesystem"
+        ]
+      },
+      "filter-low-selling-products": {
+        "app": "woocommerce",
+        "servers": [
+          "woocommerce",
+          "filesystem",
+          "emails"
+        ]
+      },
+      "flagged-transactions": {
+        "app": "google-cloud",
+        "servers": [
+          "google-cloud",
+          "excel",
+          "terminal",
+          "filesystem"
+        ]
+      },
+      "game-statistics": {
+        "app": "google-cloud",
+        "servers": [
+          "google-cloud",
+          "terminal"
+        ]
+      },
+      "git-milestone": {
+        "app": "terminal",
+        "servers": [
+          "filesystem",
+          "terminal",
+          "fetch"
+        ]
+      },
+      "hk-top-conf": {
+        "app": "terminal",
+        "servers": [
+          "filesystem",
+          "terminal",
+          "playwright_with_chunk",
+          "fetch"
+        ]
+      },
+      "huggingface-upload": {
+        "app": "terminal",
+        "servers": [
+          "filesystem",
+          "terminal",
+          "huggingface"
+        ]
+      },
+      "inter-final-performance-analysis": {
+        "app": "playwright_with_chunk",
+        "servers": [
+          "filesystem",
+          "playwright_with_chunk",
+          "google_sheet",
+          "terminal",
+          "fetch"
+        ]
+      },
+      "inventory-sync": {
+        "app": "woocommerce",
+        "servers": [
+          "woocommerce",
+          "filesystem"
+        ]
+      },
+      "language-school": {
+        "app": "playwright_with_chunk",
+        "servers": [
+          "filesystem",
+          "playwright_with_chunk",
+          "excel",
+          "fetch",
+          "terminal"
+        ]
+      },
+      "live-transactions": {
+        "app": "google-cloud",
+        "servers": [
+          "google-cloud",
+          "filesystem"
+        ]
+      },
+      "llm-training-dataset": {
+        "app": "playwright_with_chunk",
+        "servers": [
+          "playwright_with_chunk",
+          "google_sheet",
+          "scholarly",
+          "fetch"
+        ]
+      },
+      "machine-operating": {
+        "app": "google-cloud",
+        "servers": [
+          "google-cloud",
+          "filesystem",
+          "excel"
+        ]
+      },
+      "meeting-assign": {
+        "app": "playwright_with_chunk",
+        "servers": [
+          "fetch",
+          "emails",
+          "playwright_with_chunk",
+          "filesystem"
+        ]
+      },
+      "merge-hf-datasets": {
+        "app": "huggingface",
+        "servers": [
+          "huggingface",
+          "terminal",
+          "filesystem"
+        ]
+      },
+      "music-analysis": {
+        "app": "excel",
+        "servers": [
+          "excel",
+          "google_sheet",
+          "terminal"
+        ]
+      },
+      "notion-find-job": {
+        "app": "google_map",
+        "servers": [
+          "google_map",
+          "notion",
+          "emails",
+          "playwright_with_chunk"
+        ]
+      },
+      "notion-hr": {
+        "app": "notion",
+        "servers": [
+          "filesystem",
+          "emails",
+          "notion",
+          "pdf-tools"
+        ]
+      },
+      "notion-movies": {
+        "app": "playwright_with_chunk",
+        "servers": [
+          "playwright_with_chunk",
+          "notion",
+          "fetch"
+        ]
+      },
+      "notion-personal-website": {
+        "app": "notion",
+        "servers": [
+          "filesystem",
+          "word",
+          "notion"
+        ]
+      },
+      "paper-checker": {
+        "app": "terminal",
+        "servers": [
+          "filesystem",
+          "terminal"
+        ]
+      },
+      "price-comparison": {
+        "app": "terminal",
+        "servers": [
+          "filesystem",
+          "terminal",
+          "pdf-tools",
+          "google-cloud"
+        ]
+      },
+      "privacy-desensitization": {
+        "app": "terminal",
+        "servers": [
+          "filesystem",
+          "terminal"
+        ]
+      },
+      "profile-update-online": {
+        "app": "playwright_with_chunk",
+        "servers": [
+          "filesystem",
+          "playwright_with_chunk",
+          "scholarly",
+          "arxiv_local",
+          "pdf-tools"
+        ]
+      },
+      "reimbursement-form-filler": {
+        "app": "excel",
+        "servers": [
+          "filesystem",
+          "excel",
+          "pdf-tools",
+          "terminal"
+        ]
+      },
+      "sales-accounting": {
+        "app": "excel",
+        "servers": [
+          "memory",
+          "excel",
+          "filesystem"
+        ]
+      },
+      "search-ca-school": {
+        "app": "google_map",
+        "servers": [
+          "filesystem",
+          "google_map",
+          "playwright_with_chunk",
+          "fetch"
+        ]
+      },
+      "shopping-helper": {
+        "app": "playwright_with_chunk",
+        "servers": [
+          "filesystem",
+          "playwright_with_chunk"
+        ]
+      },
+      "stock-build-position": {
+        "app": "excel",
+        "servers": [
+          "excel",
+          "yahoo-finance",
+          "terminal"
+        ]
+      },
+      "subway-planning": {
+        "app": "google_map",
+        "servers": [
+          "google_map",
+          "filesystem",
+          "playwright_with_chunk",
+          "fetch"
+        ]
+      },
+      "travel-exchange": {
+        "app": "terminal",
+        "servers": [
+          "terminal",
+          "filesystem",
+          "yahoo-finance"
+        ]
+      },
+      "trip-adviser": {
+        "app": "google_map",
+        "servers": [
+          "google_map",
+          "fetch",
+          "filesystem",
+          "playwright_with_chunk"
+        ]
+      },
+      "trip-itinerary-generator": {
+        "app": "google_map",
+        "servers": [
+          "filesystem",
+          "google_map",
+          "playwright_with_chunk"
+        ]
+      },
+      "university-course-selection": {
+        "app": "terminal",
+        "servers": [
+          "filesystem",
+          "pdf-tools",
+          "terminal",
+          "excel"
+        ]
+      },
+      "upenn-campus-route": {
+        "app": "terminal",
+        "servers": [
+          "filesystem",
+          "terminal",
+          "google_map",
+          "fetch"
+        ]
+      },
+      "verl-dataset": {
+        "app": "huggingface",
+        "servers": [
+          "huggingface",
+          "filesystem",
+          "fetch"
+        ]
+      },
+      "vlm-history-completer": {
+        "app": "playwright_with_chunk",
+        "servers": [
+          "playwright_with_chunk",
+          "google_sheet",
+          "arxiv_local",
+          "huggingface",
+          "fetch"
+        ]
+      },
+      "woocommerce-customer-survey": {
+        "app": "woocommerce",
+        "servers": [
+          "woocommerce",
+          "emails",
+          "google_forms",
+          "filesystem"
+        ]
+      },
+      "woocommerce-new-product": {
+        "app": "woocommerce",
+        "servers": [
+          "woocommerce",
+          "filesystem",
+          "emails"
+        ]
+      },
+      "woocommerce-new-welcome": {
+        "app": "woocommerce",
+        "servers": [
+          "woocommerce",
+          "filesystem",
+          "terminal",
+          "google-cloud",
+          "emails"
+        ]
+      },
+      "woocommerce-product-recall": {
+        "app": "woocommerce",
+        "servers": [
+          "woocommerce",
+          "emails",
+          "google_forms",
+          "filesystem"
+        ]
+      },
+      "woocommerce-stock-alert": {
+        "app": "woocommerce",
+        "servers": [
+          "woocommerce",
+          "google_sheet",
+          "emails",
+          "filesystem"
+        ]
+      },
+      "woocommerce-update-cover": {
+        "app": "woocommerce",
+        "servers": [
+          "woocommerce"
+        ]
+      }
+    }
+  }
+}

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from dataclasses import dataclass
 from typing import Any
 
@@ -11,8 +13,10 @@ from worldcalib.schemas import RetrievalHit
 from worldcalib.utils.text import estimate_tokens
 
 
-DEFAULT_MODEL = "/data/home/yuhan/model_zoo/Qwen3-8B"
-DEFAULT_BASE_URL = "http://127.0.0.1:8000/v1"
+DEFAULT_MODEL = os.environ.get("WORLDCALIB_MODEL", "deepseek-v4-flash")
+DEFAULT_BASE_URL = os.environ.get(
+    "WORLDCALIB_BASE_URL", "https://api.deepseek.com/v1"
+)
 
 
 @dataclass(frozen=True)

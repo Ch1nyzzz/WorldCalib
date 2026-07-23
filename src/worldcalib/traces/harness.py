@@ -125,16 +125,24 @@ class TraceHarness:
             if not isinstance(tasks, list):
                 continue
             traces = []
+            seen_ids: dict[str, int] = {}
             for task in tasks:
                 if not isinstance(task, dict):
                     continue
-                traces.append(
-                    self.adapter.build_trace(
-                        iteration=iteration,
-                        candidate_id=candidate.candidate_id,
-                        task=task,
-                    )
+                trace = self.adapter.build_trace(
+                    iteration=iteration,
+                    candidate_id=candidate.candidate_id,
+                    task=task,
                 )
+                # Multi-run eval (runs >= 2) repeats each task_id, and the
+                # adapters derive trace_id from it — disambiguate repeats so
+                # the indexer's UNIQUE(trace_id) holds. The first occurrence
+                # keeps the original id (runs=1 behavior unchanged).
+                n = seen_ids.get(trace.trace_id, 0)
+                seen_ids[trace.trace_id] = n + 1
+                if n:
+                    trace.trace_id = f"{trace.trace_id}_r{n + 1}"
+                traces.append(trace)
             path = self.recorder.write(
                 iteration=iteration,
                 candidate_id=candidate.candidate_id,

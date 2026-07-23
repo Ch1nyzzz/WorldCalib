@@ -7,15 +7,15 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-VENDOR_ROOT = PROJECT_ROOT / "references" / "vendor"
+from worldcalib.paths import runtime_root
 
 
-def vendor_path(name: str) -> Path:
+
+def vendor_path(name: str, *, root: Path | None = None) -> Path:
     """Return the checked-out reference repository path."""
 
-    return VENDOR_ROOT / name
+    vendor_root = root or (runtime_root() / "references" / "vendor")
+    return Path(vendor_root).expanduser().resolve() / name
 
 
 @contextmanager

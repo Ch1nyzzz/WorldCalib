@@ -1,7 +1,7 @@
 """Claude Code proposer runner.
 
 This module wraps the ``claude -p`` CLI for non-interactive proposer
-invocations. Optimizer1 only supports the Claude Code proposer; older
+invocations. WorldCalib supports Claude Code and Codex proposers; older
 OpenCode / Codex / Kimi runners that previously lived in this file have
 been removed. The historical names ``claude_runner`` and ``ClaudeResult``
 are preserved as the canonical runner / result types.
@@ -770,34 +770,6 @@ def _extract_claude_tool_access(
     }
 
 
-def _is_runstore_tool_name(name: str) -> bool:
-    return (
-        name.startswith("mcp__runstore-tools__runstore_")
-        or name.startswith("runstore_")
-    )
-
-
-def _is_runstore_trace_tool_name(name: str) -> bool:
-    return (
-        name.startswith("mcp__runstore-tools__runstore_fact_state")
-        or name.startswith("mcp__runstore-tools__runstore_fact_candidate_outcome")
-        or name.startswith("mcp__runstore-tools__runstore_fact_compare_iterations")
-        or name.startswith("mcp__runstore-tools__runstore_fact_task_history")
-        or name.startswith("mcp__runstore-tools__runstore_fact_trace")
-        or name.startswith("mcp__runstore-tools__runstore_link_")
-        or name.startswith("mcp__runstore-tools__runstore_artifact_")
-    )
-
-
-def _is_runstore_mod_tool_name(name: str) -> bool:
-    return (
-        name.startswith("mcp__runstore-tools__runstore_fact_modification")
-        or name.startswith("mcp__runstore-tools__runstore_fact_proposer_call")
-        or name.startswith("mcp__runstore-tools__runstore_fact_file_history")
-        or name.startswith("mcp__runstore-tools__runstore_fact_proposal")
-    )
-
-
 def _evidence_path_bucket(path: str) -> str | None:
     normalized = path.replace("\\", "/").lstrip("./")
     if "/workspace/" in normalized:
@@ -813,18 +785,9 @@ def _summarize_evidence_usage(
     tool_uses: list[dict[str, Any]],
     files_read: dict[str, dict[str, int]],
 ) -> dict[str, Any]:
-    runstore_tool_calls = 0
-    runstore_trace_tool_calls = 0
-    runstore_mod_tool_calls = 0
-    for item in tool_uses:
-        name = str(item.get("name") or "")
-        if _is_runstore_tool_name(name):
-            runstore_tool_calls += 1
-        if _is_runstore_trace_tool_name(name):
-            runstore_trace_tool_calls += 1
-        if _is_runstore_mod_tool_name(name):
-            runstore_mod_tool_calls += 1
+    """Summarize direct reads of staged evidence files."""
 
+    del tool_uses
     raw_reads = {"traces": 0, "reference_iterations": 0, "summaries": 0}
     raw_unique = {"traces": set(), "reference_iterations": set(), "summaries": set()}
     for path, meta in files_read.items():
@@ -832,31 +795,19 @@ def _summarize_evidence_usage(
         if bucket is None:
             continue
         details = meta if isinstance(meta, dict) else {}
-        reads = _int_metric(details.get("reads", 0))
-        if reads <= 0:
-            reads = 1
+        reads = _int_metric(details.get("reads", 0)) or 1
         raw_reads[bucket] += reads
         raw_unique[bucket].add(str(path))
 
-    raw_evidence_file_reads = sum(raw_reads.values())
-    evidence_events = runstore_tool_calls + raw_evidence_file_reads
+    total = sum(raw_reads.values())
     return {
-        "runstore_tool_calls": runstore_tool_calls,
-        "runstore_trace_tool_calls": runstore_trace_tool_calls,
-        "runstore_mod_tool_calls": runstore_mod_tool_calls,
         "raw_trace_file_reads": raw_reads["traces"],
         "raw_reference_file_reads": raw_reads["reference_iterations"],
         "raw_summary_file_reads": raw_reads["summaries"],
-        "raw_evidence_file_reads": raw_evidence_file_reads,
+        "raw_evidence_file_reads": total,
         "raw_trace_unique_files": len(raw_unique["traces"]),
         "raw_reference_unique_files": len(raw_unique["reference_iterations"]),
         "raw_summary_unique_files": len(raw_unique["summaries"]),
-        "evidence_usage_events": evidence_events,
-        "evidence_usage_rate": (
-            round(runstore_tool_calls / evidence_events, 4)
-            if evidence_events
-            else 0.0
-        ),
     }
 
 

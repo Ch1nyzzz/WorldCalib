@@ -5,7 +5,7 @@ fields the QA trace builder expects (``task_id, question, gold_answer,
 prediction, score, passed, prompt_tokens, completion_tokens, retrieved``) — the
 ``prediction`` is the generated SQL — plus diagnostic ``status``/``error`` /
 ``grade_error`` metadata, so we delegate to the shared ``_build_trace_for_qa``
-helper like the GAIA / AgentBench adapters.
+helper like the GAIA adapter.
 """
 
 from __future__ import annotations
