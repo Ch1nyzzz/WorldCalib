@@ -45,19 +45,19 @@ from .schema import (
 # Auto-register built-in adapters so importing the package is enough.
 from .adapters.longmemeval import LongMemEvalAdapter
 from .adapters.locomo import LocomoAdapter
-from .adapters.agentbench import AgentBenchAdapter
-from .adapters.tau2 import Tau2Adapter
-from .adapters.arc import ArcAdapter
-from .adapters.swebench import SwebenchAdapter
-from .adapters.autolab import AutolabAdapter
+from .adapters.gaia import GaiaAdapter
+from .adapters.tb2 import Tb2Adapter
+from .adapters.spider2 import Spider2Adapter
+from .adapters.toolathlon import ToolathlonAdapter
+from .adapters.appworld import AppWorldAdapter
 
 register_adapter(LongMemEvalAdapter())
 register_adapter(LocomoAdapter())
-register_adapter(AgentBenchAdapter())
-register_adapter(Tau2Adapter())
-register_adapter(ArcAdapter())
-register_adapter(SwebenchAdapter())
-register_adapter(AutolabAdapter())
+register_adapter(GaiaAdapter())
+register_adapter(Tb2Adapter())
+register_adapter(Spider2Adapter())
+register_adapter(ToolathlonAdapter())
+register_adapter(AppWorldAdapter())
 
 __all__ = [
     "ALL_STATUSES",

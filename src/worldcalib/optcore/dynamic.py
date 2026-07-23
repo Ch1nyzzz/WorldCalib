@@ -1,18 +1,7 @@
-"""Generic dynamic loading for candidate agent scaffolds.
+"""Generic dynamic loading for self-distilled agent-policy candidates.
 
-The shared body of the two per-backend loaders (``agent_dynamic`` for
-agentbench, ``tau2_dynamic`` for tau2): given pending_eval candidate metadata it
-instantiates a scaffold object, reusing the isolation and module helpers from
-``dynamic`` so source-backed candidates (an edited scaffold tree under a
-workspace snapshot) import from the copied tree instead of the host package.
-
-Backends parameterize this with their own registry builder, source-class map,
-default seed key, and type check; the control flow (source-backed edited
-scaffold → built-in registry → dynamic module/class/factory/build_scaffold/
-SCAFFOLD_CLASS) is identical across backends and lives here once.
-
-Kept ``agentrl`` / ``tau2`` free: it imports neither at module top level, so the
-tau2 backend can route through it without pulling in agentrl.
+Backends provide a registry, source-class map, default seed, and compatibility
+check while this module supplies isolated snapshot imports.
 """
 
 from __future__ import annotations
@@ -44,7 +33,7 @@ def load_candidate_selfdistill_scaffold(
 
     Args:
         candidate: pending_eval candidate metadata.
-        project_root: repo root used to resolve ``src`` and snapshot paths.
+        project_root: runtime root used to resolve candidate snapshot paths.
         registry_build: builds a built-in scaffold by name.
         source_classes: scaffold_name -> (module, class) inside the snapshot.
         default_seed: key into ``source_classes`` used as the fallback when the
@@ -90,7 +79,7 @@ def load_candidate_selfdistill_scaffold(
 
     if not (module_name or module_path):
         raise ValueError(
-            "agentic candidate must provide `scaffold_name`, `module`, or `module_path`"
+            "candidate must provide `scaffold_name`, `module`, or `module_path`"
         )
 
     # dynamic module / class / factory (optionally isolated from a snapshot)

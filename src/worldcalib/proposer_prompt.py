@@ -1,13 +1,8 @@
-"""Prompt builder for proposer iterations.
+"""Build the per-iteration proposer assignment.
 
-The proposer's static contract — role, objective, search space, quality
-gate, edit scope, workflow — lives in the per-benchmark skill at
-``prompts/skills/<benchmark>/SKILL.md`` and is delivered to the agent
-through the system-prompt channel (``--append-system-prompt`` for Claude,
-``<workspace>/AGENTS.md`` for Codex). This module assembles only the
-per-iteration *user message*: the assignment fields, reference-role and
-bandit blocks, the available-files listing, and the ``pending_eval.json``
-schema with live path substitutions.
+Static benchmark contracts live in package prompt resources. This module only
+describes the current iteration, staged evidence, editable paths, and required
+candidate JSON.
 """
 
 from __future__ import annotations
@@ -15,45 +10,34 @@ from __future__ import annotations
 from pathlib import Path
 
 
-_GRAPH_COLOURING_TARGETS = {
-    "graph_colouring_source",
-    "graph_colouring",
-    "graphcolouring",
-    "graphcolour",
+_EXTERNAL_SOURCE_DIRS = {
+    "appworld_passthrough": "appworld",
+    "toolathlon_passthrough": "toolathlon",
+    "terminus2_tb2": "terminus2_agent_tb2",
 }
 
 
-def _is_graph_colouring(target_system: str) -> bool:
-    return target_system.lower() in _GRAPH_COLOURING_TARGETS
-
-
 def _optimization_subject(target_system: str) -> str:
-    """Return a short phrase for what the proposer is optimizing."""
-
-    normalized = target_system.lower()
-    if normalized in {"mini_swe_agent_source", "mini_swe_agent", "minisweagent"}:
-        return "source-backed coding agent control loop"
-    if _is_graph_colouring(target_system):
-        return "source-backed C++ graph-colouring heuristic"
-    return "memory layer"
+    return {
+        "appworld_passthrough": "AppWorld code-agent policy",
+        "toolathlon_passthrough": "Toolathlon tool-use policy",
+        "terminus2_tb2": "Terminal-Bench 2.0 terminal-agent harness",
+        "agent": "agent policy",
+    }.get(target_system.lower(), "memory or agent scaffold")
 
 
 def _candidate_scaffold_name(target_system: str) -> str:
-    """Return the scaffold/agent name shown in the candidate JSON example."""
-
-    if target_system.lower().endswith("_source"):
+    normalized = target_system.lower()
+    if normalized in _EXTERNAL_SOURCE_DIRS or normalized.endswith("_source"):
         return target_system
     return f"{target_system}_source"
 
 
-def _default_source_project_path(source_snapshot_dir: Path, target_system: str) -> str:
-    """Return the source path candidates should point at in pending_eval.json."""
-
-    if target_system.lower() in {"mini_swe_agent_source", "mini_swe_agent", "minisweagent"}:
-        return f"{source_snapshot_dir}/candidate/upstream_source/mini-swe-agent"
-    if _is_graph_colouring(target_system):
-        return f"{source_snapshot_dir}/candidate/upstream_source/graph-colouring"
-    return f"{source_snapshot_dir}/candidate/project_source"
+def _editable_source_path(source_snapshot_dir: Path, target_system: str) -> Path:
+    external = _EXTERNAL_SOURCE_DIRS.get(target_system.lower())
+    if external:
+        return source_snapshot_dir / "candidate" / "upstream_source" / external
+    return source_snapshot_dir / "candidate" / "project_source"
 
 
 def build_progressive_proposer_prompt(
@@ -78,30 +62,10 @@ def build_progressive_proposer_prompt(
     current_base_iter: int | None = None,
     current_base_passrate: float | None = None,
     current_base_average_score: float | None = None,
-    state_path: Path | None = None,
-    organized: bool = False,
     trace_harness_dir: Path | None = None,
 ) -> str:
-    """Build the proposer's per-iteration user message.
+    """Return the user-message assignment for one proposer invocation."""
 
-    Returns only the iteration assignment: run/iteration metadata,
-    reference-role notes, the available-files listing, the edit scope,
-    and the ``pending_eval.json`` schema. The proposer's static contract
-    is delivered separately as the per-benchmark skill through the
-    system-prompt channel, so it is never inlined here.
-    """
-
-    direction_lines = "\n".join(f"- {line}" for line in optimization_directions)
-    focus_section = ""
-    if direction_lines:
-        focus_section = f"""
-## Optimization Focus
-
-You may choose one of these mechanism directions, combine them, or make an
-overall system-level redesign:
-
-{direction_lines}
-"""
     workspace_dir = run_dir
 
     def show(path: Path) -> str:
@@ -111,307 +75,147 @@ overall system-level redesign:
             return str(path)
 
     refs = ", ".join(f"iter_{item:03d}" for item in reference_iterations) or "none"
-    if selection_policy == "self":
-        reference_role_note = (
-            "- Self-select reference roles: all previous raw iterations are "
-            "available, each with its full `source_snapshot/`. YOU choose the "
-            "parent to build on (see Starting Point below).\n"
-        )
-    else:
-        reference_role_note = ""
     refs_json = ", ".join(str(item) for item in reference_iterations)
-    pending_eval_display = show(pending_eval_path)
-    state_display = show(state_path) if state_path is not None else None
-    summaries_display = show(summaries_dir)
-    reference_display = show(reference_iterations_dir)
+    pending = show(pending_eval_path)
+    summaries = show(summaries_dir)
+    references = show(reference_iterations_dir)
+    snapshot = show(source_snapshot_dir)
+    generated = show(generated_dir)
+    editable = show(_editable_source_path(source_snapshot_dir, target_system))
+
     if include_summaries:
-        summaries_assignment_line = f"- Cumulative summaries: `{summaries_display}/`"
-        summaries_files_block = (
-            f"- `{summaries_display}/evolution_summary.jsonl` — full cumulative event history\n"
-            f"  through the previous iteration.\n"
-            f"- `{summaries_display}/best_candidates.json` — current passrate/average_score\n"
-            f"  quality Pareto frontier candidates."
+        summary_assignment = f"- Cumulative summaries: {summaries}/"
+        summary_files = (
+            f"- {summaries}/evolution_summary.jsonl — full event history through "
+            "the previous iteration.\n"
+            f"- {summaries}/best_candidates.json — current quality frontier."
         )
     else:
-        summaries_assignment_line = (
-            "- Cumulative summaries: **not provided in this run** — there is no `summaries/` "
-            "directory and no cumulative digest in this prompt. Judge prior iterations "
-            f"directly from each bundle's `eval/`, `diff.patch`, and `diff_digest.md` under "
-            f"`{reference_display}/iter_NNN/`."
+        summary_assignment = "- Cumulative summaries: not provided in this run."
+        summary_files = (
+            f"- No cumulative summaries; inspect {references}/iter_NNN/ directly."
         )
-        summaries_files_block = (
-            "- (no cumulative summary files in this run — inspect the raw iteration bundles "
-            f"under `{reference_display}/iter_NNN/` instead)"
-        )
-    if organized:
-        if state_display is not None:
-            state_assignment = f"- State snapshot: `{state_display}`"
-            state_file_line = (
-                f"- `{state_display}` — current optimizer state snapshot generated from RunStore. "
-                "Read this first. It is not evidence and not a plan.\n"
-            )
-        else:
-            state_assignment = "- State snapshot: **not provided in this organized run**"
-            state_file_line = "- (no state.md in this organized run)\n"
-        if include_summaries:
-            summaries_assignment_line = (
-                f"{state_assignment}\n"
-                f"- Cumulative summaries: `{summaries_display}/`"
-            )
-            summaries_files_block = (
-                state_file_line
-                + "- RunStore MCP tools — query structured modification, trace, and outcome facts. "
-                "Do not open or copy the backing SQLite DB directly.\n"
-                + summaries_files_block
-            )
-        else:
-            summaries_assignment_line = (
-                f"{state_assignment}\n"
-                "- Cumulative summaries: **not provided to the proposer in organized mode**."
-            )
-            summaries_files_block = (
-                state_file_line
-                + "- RunStore MCP tools — query structured modification, trace, and outcome facts. "
-                "Do not open or copy the backing SQLite DB directly.\n"
-                "- (no cumulative summary files in organized mode)"
-            )
-    source_snapshot_display = show(source_snapshot_dir)
-    generated_display = show(generated_dir)
-    optimization_subject = _optimization_subject(target_system)
-    candidate_scaffold_name = _candidate_scaffold_name(target_system)
-    default_source_project_path = _default_source_project_path(
-        Path(source_snapshot_display),
-        target_system,
-    )
-    is_mini_swe_agent = target_system.lower() in {
-        "mini_swe_agent_source",
-        "mini_swe_agent",
-        "minisweagent",
-    }
-    is_graph_colouring = _is_graph_colouring(target_system)
-    if is_mini_swe_agent:
-        source_path_note = (
-            "`extra.source_project_path` must point to the edited mini-SWE-agent "
-            "snapshot under `source_snapshot/candidate/upstream_source/mini-swe-agent`."
-        )
-    elif is_graph_colouring:
-        source_path_note = (
-            "`extra.source_project_path` must point to the edited graph-colouring "
-            "snapshot under `source_snapshot/candidate/upstream_source/graph-colouring`."
-        )
-    else:
-        source_path_note = (
-            "`extra.source_project_path` must point to the edited snapshot project source "
-            "when files under `project_source/src/worldcalib` are modified."
-        )
-    mini_swe_source_note = (
-        f"- `{source_snapshot_display}/candidate/upstream_source/mini-swe-agent/` — "
-        "primary editable mini-SWE-agent source tree for coding-agent mechanisms.\n"
-        if is_mini_swe_agent
-        else ""
-    )
-    graph_colouring_source_note = (
-        (
-            f"- `{source_snapshot_display}/candidate/upstream_source/graph-colouring/src/algorithms/` — "
-            "editable C++ algorithm files. Mutate `evolved.cpp` (the seed delegates "
-            "to TabuCol) and freely include / call the other algorithms (`dsatur.h`, "
-            "`welsh_powell.h`, `tabu.h`, `simulated_annealing.h`, `genetic.h`, "
-            "`exact_solver.h`) to build hybrid heuristics.\n"
-            f"- `{source_snapshot_display}/candidate/upstream_source/graph-colouring/src/benchmark_runner.cpp` — "
-            "editable dispatch / CLI entry. You MAY register additional algorithm "
-            "names; the harness always invokes `--algorithm evolved`, so keep that "
-            "entry working.\n"
-            f"- `{source_snapshot_display}/candidate/upstream_source/graph-colouring/data/dimacs/` — "
-            "read-only DIMACS instances used for evaluation.\n"
-        )
-        if is_graph_colouring
-        else ""
-    )
-    mini_swe_edit_note = (
-        "\nFor mini-SWE-agent candidates, edit "
-        f"`{source_snapshot_display}/candidate/upstream_source/mini-swe-agent/**` "
-        "for agent control-loop, prompt/config, action parsing, verification, or "
-        "submission behavior, and point `extra.source_project_path` at that tree.\n"
-        if is_mini_swe_agent
-        else ""
-    )
-    graph_colouring_edit_note = (
-        (
-            "\nFor graph-colouring candidates, your editable surface is "
-            f"`{source_snapshot_display}/candidate/upstream_source/graph-colouring/src/algorithms/**` "
-            "and `src/benchmark_runner.cpp`. Do NOT edit `src/io/**` (the CSV "
-            "writer is the integrity boundary), the Makefile, or anything outside "
-            "the upstream copy. Point `extra.source_project_path` at the "
-            "graph-colouring tree.\n\n"
-            "Evaluation is lexicographic:\n"
-            "1. PRIMARY  — colors_used per instance, lower is strictly better.\n"
-            "2. TIEBREAK — runtime_ms, lower wins, but ONLY when colors_used "
-            "matches.\n\n"
-            "Do not trade more colours for less runtime — that is a regression. "
-            "Do not read the chromatic-number metadata at runtime, hardcode a "
-            "known-optimal lookup, or short-circuit the colouring search; those "
-            "candidates are auto-rejected by the policy scanner.\n"
-        )
-        if is_graph_colouring
-        else ""
-    )
 
     if current_base_iter is not None:
+        metrics = ""
         if current_base_passrate is not None:
-            avg_part = (
-                f", average_score {current_base_average_score:.4f}"
-                if current_base_average_score is not None
-                else ""
-            )
-            base_metric_clause = (
-                f" (passrate {current_base_passrate:.4f}{avg_part})"
-            )
-        else:
-            base_metric_clause = ""
+            metrics = f" (passrate {current_base_passrate:.4f}"
+            if current_base_average_score is not None:
+                metrics += f", average_score {current_base_average_score:.4f}"
+            metrics += ")"
         if selection_policy == "self":
-            starting_point_block = f"""## Starting Point — YOU choose the parent
+            starting_point = f"""## Starting point
 
-The DEFAULT patch base is `iter_{current_base_iter:03d}`{base_metric_clause} —
-the lex-best candidate so far (passrate first, average_score tiebreak).
-`{source_snapshot_display}/candidate/project_source/` is already initialized to
-that candidate's source.
-
-You are NOT bound to it. Before designing, read `frontier_manifest.json` (every
-prior candidate's passrate / average_score / hypothesis / parent edge) and
-`task_score_matrix.json` (the full iter x task score matrix — judge per-task
-variance yourself from the history, do not chase one-off highs). Then decide:
-
-- KEEP the default base and edit on top of it; or
-- REPLACE it wholesale: copy `{reference_display}/iter_NNN/source_snapshot/candidate/project_source/`
-  (or the corresponding `upstream_source/` tree) over your editable source; or
-- GRAFT: combine mechanisms from several prior iterations' snapshots.
-
-Whatever you choose, declare the parent in your candidate config as
-`"base_iter": <N>` (use the default's number if you kept it; `0` for the clean
-seed) so the lineage stays honest."""
+The default patch base is iter_{current_base_iter:03d}{metrics}, already staged
+under {snapshot}/candidate/. Inspect frontier_manifest.json and
+task_score_matrix.json before choosing a parent. You may keep this base, replace
+it with a previous source snapshot, or graft mechanisms across prior snapshots.
+Declare the parent you actually used as base_iter in the candidate."""
         else:
-            starting_point_block = (
-                f"Your patch base is `iter_{current_base_iter:03d}`"
-                f"{base_metric_clause}. `{source_snapshot_display}/candidate/project_source/` "
-                f"is already initialized to that candidate's source — edit on top of it."
-            )
+            starting_point = f"""## Starting point
+
+Edit the staged iter_{current_base_iter:03d}{metrics} source under
+{snapshot}/candidate/."""
     elif selection_policy == "self":
-        starting_point_block = f"""## Starting Point — YOU choose the parent
+        starting_point = f"""## Starting point
 
-No prior candidate beats the seed yet, so
-`{source_snapshot_display}/candidate/` holds the clean seed source. If prior
-iterations exist, read `frontier_manifest.json` and `task_score_matrix.json`
-and feel free to copy or graft any prior iteration's snapshot from
-`{reference_display}/iter_NNN/source_snapshot/` instead of starting clean.
-Declare the parent you actually built on in your candidate config as
-`"base_iter": <N>` (`0` for the clean seed)."""
+No prior candidate beats the seed. Start from {snapshot}/candidate/ or choose a
+previous snapshot after reading frontier_manifest.json and task_score_matrix.json.
+Declare base_iter as 0 for the clean seed or the selected prior iteration."""
     else:
-        starting_point_block = f"""Every iteration starts from the clean source snapshot in
-`{source_snapshot_display}/candidate/`. Historical iterations are diagnostic
-references only. Do not treat any reference iteration as a source parent and do
-not mechanically copy a prior candidate; implement one intentional mechanism
-from the clean source."""
+        starting_point = f"""## Starting point
 
-    trace_harness_section = ""
-    if trace_harness_dir is not None:
-        trace_display = show(trace_harness_dir)
-        trace_harness_section = (
-            "\n"
-            f"- `{trace_display}/manifest.json` — trace harness manifest "
-            "(benchmark, baseline reference, schema version).\n"
-            f"- `{trace_display}/diagnostic/iter_NNN.md` — pre-rendered "
-            "per-iteration diff vs baseline; sections are REGRESSED, "
-            "PERSISTENT_FAIL, BREAKTHROUGH, plus counts-only STABLE_PASS / "
-            "NO_BASELINE. Read this first to spot patterns.\n"
-            f"- `{trace_display}/spans/iter_NNN/<candidate>.jsonl` — full "
-            "structured traces (one per line; span data is "
-            "benchmark-dependent and may be empty). Drill in when the markdown summary "
-            "doesn't tell you enough.\n"
+Every iteration starts from the clean source under {snapshot}/candidate/.
+Historical iterations are diagnostic references only."""
+
+    focus = ""
+    if optimization_directions:
+        focus = "\n## Optional mechanism directions\n\n" + "\n".join(
+            f"- {item}" for item in optimization_directions
         )
 
-    iteration_header = f"""# OptiHarness Proposer — iteration {iteration}
+    trace_files = ""
+    if trace_harness_dir is not None:
+        traces = show(trace_harness_dir)
+        trace_files = f"""
+- {traces}/manifest.json — trace schema and benchmark metadata.
+- {traces}/diagnostic/iter_NNN.md — regression, persistent-failure, and
+  breakthrough summaries.
+- {traces}/spans/iter_NNN/<candidate>.jsonl — full structured task traces."""
 
-You are optimizing the {optimization_subject} for {benchmark_name}.
+    external = _EXTERNAL_SOURCE_DIRS.get(target_system.lower())
+    if external:
+        edit_scope = (
+            f"The primary editable policy is {editable}/. Project source under "
+            f"{snapshot}/candidate/project_source/src/worldcalib/ is context and "
+            "harness code unless the benchmark skill explicitly permits an edit."
+        )
+    else:
+        edit_scope = (
+            f"Edit package source under {editable}/src/worldcalib/ and optional "
+            f"wrapper modules under {generated}/."
+        )
+
+    candidate_name = _candidate_scaffold_name(target_system)
+    subject = _optimization_subject(target_system)
+    return f"""# WorldCalib proposer — iteration {iteration}
+
+You are optimizing the {subject} for {benchmark_name}.
 
 ## Assignment
 
-- Run id: `{run_id}`
-- Target system: `{target_system}`
-- Eval split: `{split}`
-- Eval limit: `{limit}` (`0` means full split)
-{summaries_assignment_line}
-- Raw reference iterations: `{reference_display}/` ({refs})
-{reference_role_note}
-- Writable clean source snapshot: `{source_snapshot_display}/candidate/`
-- Generated wrapper directory: `{generated_display}/`
-- Required output: `{pending_eval_display}`
+- Run id: {run_id}
+- Target system: {target_system}
+- Budget: {budget}
+- Eval split: {split}
+- Eval limit: {limit} (0 means the full split)
+{summary_assignment}
+- Raw reference iterations: {references}/ ({refs})
+- Editable source: {editable}/
+- Optional generated modules: {generated}/
+- Required output: {pending}
 
-{starting_point_block}
-{focus_section}
+{starting_point}
+{focus}
 
-## Available Files
+## Evidence available
 
-{summaries_files_block}
-- `{reference_display}/` — raw iteration bundles copied into this workspace for
-  detailed diagnosis. Cumulative summaries may mention iterations whose raw
-  bundles are not present here.
-- `{source_snapshot_display}/candidate/project_source/src/worldcalib/` — editable
-  project source for this candidate.
-- `{source_snapshot_display}/candidate/original_project_source/src/worldcalib/` —
-  clean project source used for diffing and policy checks.
-- `{source_snapshot_display}/candidate/upstream_source/` — copied upstream
-  source when available.
-{mini_swe_source_note}{graph_colouring_source_note}
-- `{generated_display}/` — optional importable wrapper modules for this
-  iteration.
-{trace_harness_section}
+{summary_files}
+- {references}/ — raw prior iteration bundles, including diffs, evaluations,
+  task evidence, and source snapshots.
+- {snapshot}/candidate/ — the active editable snapshot.
+- {snapshot}/candidate/original_project_source/ — clean source for diffing.
+{trace_files}
 
-## Edit Scope
+## Edit scope
 
-You may edit only:
+{edit_scope}
+Write only under {snapshot}/candidate/**, {generated}/**, and {pending}.
 
-- `{source_snapshot_display}/candidate/**`
-- `{generated_display}/**`
-- `{pending_eval_display}`
+## Required output
 
-All copied project source under
-`{source_snapshot_display}/candidate/project_source/src/worldcalib/**` is editable
-for this candidate, including scaffolds, base classes, model/prompt helpers,
-dynamic-loading helpers, and utils.
-{mini_swe_edit_note}{graph_colouring_edit_note}
+Write exactly one candidate to {pending} with this JSON shape:
 
-## Required output for this iteration
-
-Write exactly this JSON file:
-`{pending_eval_display}`
-
-Schema:
-
-```json
 {{
   "candidates": [
     {{
       "name": "short_unique_name",
-      "scaffold_name": "{candidate_scaffold_name}",
+      "scaffold_name": "{candidate_name}",
       "top_k": 8,
       "window": 1,
       "source_family": "{target_system}",
       "reference_iterations": [{refs_json}],
       "build_tag": "stable_build_identifier",
-      "source_snapshot_path": "{source_snapshot_display}",
+      "source_snapshot_path": "{snapshot}",
+      "base_iter": 0,
       "extra": {{
-        "source_project_path": "{default_source_project_path}"
+        "source_project_path": "{editable}"
       }},
-      "hypothesis": "why this should improve passrate and/or average_score",
-      "generalization_evidence": "failure family, at least two independent evidence sources, and why this should transfer",
-      "counterexample_audit": "one adjacent task type or already-correct behavior this patch is designed not to hurt",
+      "hypothesis": "mechanistic reason this should improve the objective",
+      "generalization_evidence": "failure family and at least two evidence sources",
+      "counterexample_audit": "already-correct behavior this should not harm",
       "changes": "brief implementation summary"
     }}
   ]
 }}
-```
-
-Iteration-specific note: {source_path_note}
 """
-
-    return iteration_header

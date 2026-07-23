@@ -9,7 +9,7 @@ from typing import Iterable, Mapping
 
 from worldcalib.evaluation import make_initial_candidate_grid, run_initial_frontier
 from worldcalib.model import DEFAULT_BASE_URL, DEFAULT_MODEL
-from worldcalib.memory.scaffolds import (
+from worldcalib.benchmarks.memory.scaffolds import (
     DEFAULT_MEMORY_BASELINE_SCAFFOLDS as DEFAULT_BASELINE_SCAFFOLDS,
 )
 from worldcalib.schemas import CandidateResult

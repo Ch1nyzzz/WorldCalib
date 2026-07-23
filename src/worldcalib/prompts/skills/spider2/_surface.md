@@ -1,6 +1,6 @@
 ---
 name: worldcalib-proposer-spider2-surface
-description: Spider2 backend contract for the text-to-SQL proposer — what the editable backend snapshot contains, the evidence it may read while designing (the read-only databases at /spider2_db, each task's result_preview and gold_answer), the only hard constraints (target model LOCKED; scorer/data-loader OFF-LIMITS and absent by design; gold is evidence but must never be transmitted into the policy; the predicted SQL is executed), and the pending_eval output contract (kind="spider2_agent", scaffold_name="spider2_passthrough"). No failure-mode taxonomy and no mechanism suggestions: the proposer analyses all the feedback and patches the policy itself. Spliced ahead of the shared core.
+description: Spider2 backend contract for the text-to-SQL proposer — what the editable backend snapshot contains, the evidence it may read while designing (the read-only databases at /spider2_db, each task's result_preview and gold_answer), the only hard constraints (target model LOCKED; scorer/data-loader OFF-LIMITS and absent by design; gold is evidence but must never be transmitted into the policy; the predicted SQL is executed), and the pending_eval output contract (kind="spider2_agent", scaffold_name="spider2_passthrough"). The proposer analyses all the feedback and patches the policy itself. Spliced ahead of the shared core.
 ---
 
 ## What you are evolving
@@ -15,7 +15,7 @@ scaffold wrapped around it.
 
 The runtime candidate is the source-backed scaffold `spider2_passthrough`, loaded
 from the edited snapshot. The editable surface is the spider2 backend source tree
-under `project_source/src/worldcalib/agentic/backends/spider2/**`:
+under `project_source/src/worldcalib/benchmarks/spider2/**`:
 
 - `seed_passthrough.py` — **the policy** (primary). The seed is a single
   generation: a `SYSTEM_PROMPT`, one `chat(...)` call built from the task's
@@ -85,7 +85,7 @@ The exact output path and schema are in the iteration message. Independent of th
 - The `candidates` array must contain exactly one candidate.
 - The candidate MUST set `"kind": "spider2_agent"` and `"scaffold_name": "spider2_passthrough"`.
 - Point `extra.source_project_path` at the edited snapshot project source when
-  you modify `project_source/src/worldcalib/agentic/backends/spider2/...`.
+  you modify `project_source/src/worldcalib/benchmarks/spider2/...`.
 - `top_k` must be a single integer (set to 1).
 - The `hypothesis` field: the change you made, the expected `passrate` direction,
   and the evidence it came from.

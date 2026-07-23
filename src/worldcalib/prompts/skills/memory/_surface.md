@@ -1,6 +1,6 @@
 ---
 name: worldcalib-proposer-memory-surface
-description: Memory-specific evolving surface for the memory proposer — what the editable source surface contains (MemoryScaffold build()/answer() and the shared runtime helpers), and the pending_eval output contract (source-backed memgpt scaffold, build_tag for persisted-memory changes). No failure-mode taxonomy and no mechanism suggestions: the proposer analyses all the feedback and patches the scaffold itself. Spliced ahead of the shared base core; shared by both the calib and nowmc arms.
+description: Memory-specific evolving surface for the memory proposer — what the editable source surface contains (MemoryScaffold build()/answer() and the shared runtime helpers), and the pending_eval output contract (source-backed memgpt scaffold, build_tag for persisted-memory changes). The proposer analyses all the feedback and patches the scaffold itself. Spliced ahead of the shared base core; shared by both the calib and nowmc arms.
 ---
 
 ## What you are evolving
@@ -12,7 +12,7 @@ construction (`build()`) ingests the conversation into the memory store; answer
 synthesis (`answer()`) recalls evidence and produces the final answer. The usual
 source-backed surfaces:
 
-- `src/worldcalib/scaffolds/memgpt_scaffold.py` — memory construction, recall,
+- `src/worldcalib/benchmarks/memory/scaffolds/memgpt_scaffold.py` — memory construction, recall,
   archival search, retrieval, ranking, deduplication, and hit formatting.
 - `src/worldcalib/model.py` — answer-message construction, system/user prompt
   shaping, context packing, and final-answer formatting.

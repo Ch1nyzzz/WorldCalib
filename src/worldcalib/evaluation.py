@@ -12,8 +12,9 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
-from worldcalib.memory.locomo import (
+from worldcalib.benchmarks.memory.locomo import (
     default_data_path,
+    default_split_path,
     load_locomo_examples,
     prepare_locomo,
     select_split,
@@ -22,7 +23,7 @@ from worldcalib.metrics import passed, score_prediction
 from worldcalib.model import DEFAULT_BASE_URL, DEFAULT_MODEL, LocalModelClient
 from worldcalib.pareto import ParetoPoint, save_frontier
 from worldcalib.schemas import CandidateResult, LocomoExample, TaskResult
-from worldcalib.memory.scaffolds import (
+from worldcalib.benchmarks.memory.scaffolds import (
     DEFAULT_MEMORY_EVOLUTION_SEED_SCAFFOLDS as DEFAULT_EVOLUTION_SEED_SCAFFOLDS,
     DEFAULT_MEMORY_SCAFFOLD_TOP_KS as DEFAULT_SCAFFOLD_TOP_KS,
     build_memory_scaffold as build_scaffold,
@@ -465,13 +466,18 @@ def run_initial_frontier(
     max_eval_workers: int = 1,
     force: bool = False,
     pareto_quality_threshold: float = 0.125,
+    data_path: Path | None = None,
+    split_path: Path | None = None,
+    allow_download: bool = False,
 ) -> dict[str, object]:
     """Evaluate initial scaffolds and write summary + Pareto frontier."""
 
-    if not default_data_path().exists():
-        prepare_locomo()
-    all_examples = load_locomo_examples()
-    examples = select_split(all_examples, split=split)
+    resolved_data_path = data_path or default_data_path()
+    resolved_split_path = split_path or default_split_path()
+    if not resolved_data_path.exists():
+        prepare_locomo(dest=resolved_data_path, allow_download=allow_download)
+    all_examples = load_locomo_examples(data_path=resolved_data_path)
+    examples = select_split(all_examples, split=split, split_path=resolved_split_path)
     if limit:
         examples = examples[:limit]
 

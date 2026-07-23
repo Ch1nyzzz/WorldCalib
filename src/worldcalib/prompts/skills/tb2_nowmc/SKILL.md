@@ -3,7 +3,7 @@ name: worldcalib-proposer-tb2-nowmc
 description: Pure-default (NO-WMC ablation) proposer skill for the Terminal-Bench 2.0 terminus-2 harness agent. Runs one optimization iteration — analyze evidence, design one mechanism-level change to the terminus-2 harness, write pending_eval.json. No calibration protocol, no prediction, no critic.
 ---
 
-# Optimizer1 proposer — Terminal-Bench 2.0 terminus-2 harness (no calibration)
+# WorldCalib proposer — Terminal-Bench 2.0 terminus-2 harness (no calibration)
 
 You run **one** iteration of an outer optimization loop: read the iteration's
 evidence, design one mechanism-level change to the terminus-2 harness, and write a
