@@ -91,56 +91,6 @@ def write_post_eval_artifacts(
     _append_retrieval_diagnostics_summary(run_dir, diagnostics)
 
 
-def write_seed_task_table(*, run_dir: Path, seed_candidate: CandidateResult) -> None:
-    """Emit ``seed_task_table.json``: one mechanical row per seed task.
-
-    Facts only — per-trial rewards, stable/unstable, CTRF passed/failed counts,
-    timed-out, crashed, duration, trial count. No tier and no cause: those are
-    what the calib Task map derives from this table plus the raw dumps. The
-    point is to let the proposer cover every seed task at iter 1 without
-    re-opening every trial, then spend later deep reads on the tractable ones.
-    Generic across backends — a field a backend does not produce (e.g. CTRF on
-    non-terminal benches) is simply ``null``. Best-effort; never breaks the loop.
-    """
-
-    payload = _read_result_payload(seed_candidate)
-    tasks = payload.get("tasks") if isinstance(payload, dict) else None
-    if not isinstance(tasks, list):
-        return
-    rows: list[dict[str, Any]] = []
-    for task in tasks:
-        if not isinstance(task, dict):
-            continue
-        meta = task.get("metadata") if isinstance(task.get("metadata"), dict) else {}
-        rewards = meta.get("rewards")
-        rewards = list(rewards) if isinstance(rewards, list) else []
-        numeric = [float(r) for r in rewards if isinstance(r, (int, float))]
-        distinct = {round(r, 6) for r in numeric}
-        summary = meta.get("test_summary") if isinstance(meta.get("test_summary"), dict) else {}
-        rows.append(
-            {
-                "task_id": task.get("task_id"),
-                "score": task.get("score"),
-                "passed": task.get("passed"),
-                "trial_rewards": rewards,
-                "stable": (len(distinct) <= 1) if numeric else None,
-                "ctrf_tests": summary.get("tests"),
-                "ctrf_passed": summary.get("passed"),
-                "ctrf_failed": summary.get("failed"),
-                "timed_out": bool(meta.get("timed_out")),
-                "crashed": bool(meta.get("crashed")),
-                "infra_failure": bool(meta.get("infra_failure")),
-                "n_infra_errored": meta.get("n_infra_errored"),
-                "duration_s": meta.get("duration_s"),
-                "trials": meta.get("k"),
-            }
-        )
-    if not rows:
-        return
-    rows.sort(key=lambda r: (float(r.get("score") or 0.0), str(r.get("task_id") or "")))
-    _write_json(run_dir / "seed_task_table.json", {"tasks": rows})
-
-
 def write_diff_digest(*, call_dir: Path) -> None:
     """Write a compact placeholder digest from the saved diff patch."""
 

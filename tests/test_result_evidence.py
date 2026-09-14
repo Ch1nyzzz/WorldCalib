@@ -1,12 +1,9 @@
-"""Multi-run aggregation in prediction_feedback: stable-only outcomes,
+"""Multi-run raw evidence: stable-only outcomes,
 per-run visibility, and mean per-task scores."""
 
 import json
 
-from worldcalib.prediction_feedback import (
-    F2P,
-    P2F,
-    actual_flips,
+from worldcalib.result_evidence import (
     load_task_outcomes,
     load_task_pass_runs,
     load_task_scores,
@@ -87,32 +84,3 @@ def test_passed_derived_from_score_when_missing(tmp_path):
         ],
     )
     assert load_task_outcomes(p) == {"t1": True, "t2": False}
-
-
-def test_unstable_tasks_never_reach_flip_grading(tmp_path):
-    base = _write_result(
-        tmp_path / "b" if (tmp_path / "b").mkdir() is None else tmp_path / "b",
-        [
-            _row("stable_f2p", False, 0.0),
-            _row("stable_f2p", False, 0.0),
-            _row("stable_p2f", True, 1.0),
-            _row("stable_p2f", True, 1.0),
-            _row("unstable", True, 1.0),
-            _row("unstable", False, 0.0),
-        ],
-    )
-    (tmp_path / "c").mkdir()
-    cand = _write_result(
-        tmp_path / "c",
-        [
-            _row("stable_f2p", True, 1.0),
-            _row("stable_f2p", True, 1.0),
-            _row("stable_p2f", False, 0.0),
-            _row("stable_p2f", False, 0.0),
-            _row("unstable", False, 0.0),
-            _row("unstable", False, 0.0),
-        ],
-    )
-    flips = actual_flips(load_task_outcomes(cand), load_task_outcomes(base))
-    assert flips == {"stable_f2p": F2P, "stable_p2f": P2F}
-    assert "unstable" not in flips

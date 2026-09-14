@@ -11,8 +11,9 @@ WorldCalib separates the optimization protocol from benchmark execution.
    change.
 5. The benchmark runner evaluates that isolated candidate and emits the common
    `CandidateResult` plus per-task records.
-6. Post-evaluation code normalizes evidence, records prediction feedback, and
-   updates the frontier. The calibrated arm then corrects its beliefs.
+6. Post-evaluation code normalizes evidence and updates the frontier. In the
+   next iteration, the calibrated proposer grades its prediction and corrects
+   its beliefs using raw evidence.
 
 ## Boundaries
 

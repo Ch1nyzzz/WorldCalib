@@ -1,10 +1,12 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "worldcalib"
 version = "0.1.0"
+license = "MIT"
+license-files = ["LICENSE"]
 description = "Belief-calibrated scaffold optimization across the WorldCalib paper benchmarks."
 readme = "README.md"
 requires-python = ">=3.11"

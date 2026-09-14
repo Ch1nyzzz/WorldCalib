@@ -64,7 +64,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-summary", action="store_true")
     parser.add_argument("--test-frontier", action="store_true")
     parser.add_argument("--test-limit", type=int, default=0)
-    parser.add_argument("--test-frontier-candidate-limit", type=int, default=0)
+    parser.add_argument("--test-frontier-candidate-limit", type=int, default=0,
+                        help="0: paper rule (memory top-3, agents top-1); positive values override it")
     parser.add_argument("--trace-baseline-path", type=Path, default=None)
 
     parser.add_argument("--proposer-variant", choices=("calib", "nowmc"), default="calib")
@@ -198,10 +199,19 @@ def _common_config(args: argparse.Namespace, work_dir: Path, out_dir: Path) -> d
         if proposer_model:
             config["claude_model"] = proposer_model
         config["claude_effort"] = proposer_effort
-        if args.proposer_base_url:
-            config["claude_base_url"] = args.proposer_base_url
-        if args.proposer_auth_token:
-            config["claude_auth_token"] = args.proposer_auth_token
+        is_kimi = str(proposer_model).lower().startswith("kimi")
+        token = args.proposer_auth_token
+        endpoint = args.proposer_base_url
+        if is_kimi and not args.claude_native_auth:
+            token = token or os.environ.get("KIMI_API_KEY")
+            endpoint = endpoint or os.environ.get("KIMI_BASE_URL")
+            if not token or not endpoint or token.startswith("<") or endpoint.startswith("<"):
+                raise ValueError("Kimi proposer requires KIMI_API_KEY and KIMI_BASE_URL "
+                                 "or explicit --proposer-auth-token/--proposer-base-url")
+        if endpoint:
+            config["claude_base_url"] = endpoint
+        if token:
+            config["claude_auth_token"] = token
     return config
 
 
