@@ -58,10 +58,6 @@ class SelfDistillOptimizer(LocomoOptimizer):
         self._seed_world_model_calibration()
         return {"candidates": candidates}
 
-    # NOTE: the base ``_score_prediction_feedback`` is hidden mechanical
-    # telemetry only (no LLM critic, never staged into a workspace), so the
-    # self-distill protocol holds without an override here.
-
     # ── abstract hooks each backend implements ────────────────────────────────
 
     def _load_examples_for_split(self, split: str, limit: int = 0) -> list[LocomoExample]:

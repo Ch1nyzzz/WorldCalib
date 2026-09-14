@@ -43,7 +43,6 @@ from worldcalib.paths import package_file, runtime_root
 from worldcalib.post_eval import (
     write_diff_digest,
     write_post_eval_artifacts,
-    write_seed_task_table,
 )
 from worldcalib.traces import TraceHarness, has_adapter
 from worldcalib.proposer_prompt import build_progressive_proposer_prompt
@@ -809,7 +808,6 @@ class LocomoOptimizer:
         )
         self._refresh_run_indexes(existing_candidates + evaluated)
         self._stage_task_dump_evidence(iteration, evaluated)
-        self._grade_aggregate_bet(iteration, evaluated)
         return evaluated
 
     def _build_progressive_workspace(
@@ -1279,7 +1277,6 @@ class LocomoOptimizer:
             if src is not None:
                 shutil.copy2(src, eval_dir / "candidate_result.json")
             self._stage_task_dump_evidence(0, seeds)
-            write_seed_task_table(run_dir=self.run_dir, seed_candidate=seeds[0])
         except OSError:
             return
 
@@ -1313,7 +1310,7 @@ class LocomoOptimizer:
         if not copied and dest.exists():
             shutil.rmtree(dest)
 
-    # ---- calib variant: hidden mechanical prediction telemetry --------------
+    # ---- candidate evidence and calibration persistence --------------------
 
     def _calib_result_path(self, candidate: CandidateResult) -> Path | None:
         """Resolve a candidate's result json to an absolute path."""
@@ -1328,130 +1325,13 @@ class LocomoOptimizer:
         hits = sorted((self.run_dir / "candidate_results").glob(f"*{cid}*.json")) if cid else []
         return hits[0] if hits else None
 
-    def _grade_aggregate_bet(
-        self, iteration: int, evaluated: list[CandidateResult]
-    ) -> None:
-        """Mechanically grade this iter's ``## Aggregate bet (machine)`` from
-        the proposer's ``prediction.md`` against the realized STABLE per-task
-        outcomes, writing ``aggregate_grade.md`` into the iteration dir; the
-        next iter stages it as ``./prev_aggregate_grade.md``.
-
-        An instrument reading the proposer reconciles with its own self-grade —
-        it vetoes nothing and selects nothing. Calib-only; best-effort; never
-        breaks the loop.
-        """
-        if self.config.proposer_variant == "nowmc":
-            return
-        pred_path = self._iteration_dir(iteration) / "workspace" / "prediction.md"
-        if not pred_path.is_file() or not evaluated:
-            return
-        try:
-            from .prediction_feedback import (
-                grade_aggregate_bet,
-                historically_unstable_tasks,
-                load_task_outcomes,
-                parse_aggregate_bet,
-                parse_prediction,
-                render_aggregate_grade,
-            )
-
-            text = pred_path.read_text(encoding="utf-8")
-            out_path = self._iteration_dir(iteration) / "aggregate_grade.md"
-            bet = parse_aggregate_bet(text)
-            if bet is None:
-                out_path.write_text(
-                    "# aggregate grade — no machine bet found\n\n"
-                    "prediction.md carried no `## Aggregate bet (machine)` "
-                    "section, so nothing was mechanically gradable this iter. "
-                    "Write the block (subset / min_mean_delta / "
-                    "max_stable_regressions) to get an instrument reading.\n",
-                    encoding="utf-8",
-                )
-                return
-            base_iter = parse_prediction(text).base_iter or 0
-            # Primary: iteration_index.json maps iteration -> result paths and
-            # handles seed results whose filenames carry no iterNNN prefix
-            # (e.g. appworld_passthrough.json), possibly living in the seed
-            # run's dir. Fallback: the iterNNN* filename convention.
-            base_path: Path | None = None
-            try:
-                index_rows = json.loads(
-                    (self.run_dir / "iteration_index.json").read_text(
-                        encoding="utf-8"
-                    )
-                )
-                for row in index_rows:
-                    if row.get("iteration") != base_iter:
-                        continue
-                    for rp in row.get("candidate_result_paths") or []:
-                        p = Path(rp)
-                        if not p.is_absolute():
-                            p = (
-                                self.run_dir.parent.parent / rp
-                                if rp.startswith("runs/")
-                                else self.run_dir / rp
-                            )
-                        if p.is_file():
-                            base_path = p
-                            break
-                    break
-            except (OSError, json.JSONDecodeError):
-                pass
-            if base_path is None:
-                hits = sorted(
-                    (self.run_dir / "candidate_results").glob(
-                        f"iter{base_iter:03d}*.json"
-                    )
-                )
-                base_path = hits[0] if hits else None
-            cand_path = self._calib_result_path(evaluated[0])
-            if cand_path is None or base_path is None:
-                out_path.write_text(
-                    f"# aggregate grade — ungradable\n\nbase iter_{base_iter} "
-                    "or this candidate's result json could not be resolved.\n",
-                    encoding="utf-8",
-                )
-                return
-            # Cross-iteration noise filter: the matrix staged into THIS iter's
-            # workspace holds the per-task history up to the previous iteration
-            # (the candidate itself is not in it), so tasks it marks as
-            # oscillating are noise no candidate should be charged for.
-            history_unstable: set[str] = set()
-            matrix_path = (
-                self._iteration_dir(iteration) / "workspace" / "task_score_matrix.json"
-            )
-            try:
-                matrix = json.loads(matrix_path.read_text(encoding="utf-8"))
-                history_unstable = historically_unstable_tasks(
-                    matrix.get("tasks") or {}
-                )
-            except (OSError, json.JSONDecodeError, ValueError):
-                pass
-            metrics = grade_aggregate_bet(
-                bet,
-                load_task_outcomes(cand_path),
-                load_task_outcomes(base_path),
-                history_unstable=history_unstable,
-            )
-            out_path.write_text(
-                render_aggregate_grade(iteration, metrics), encoding="utf-8"
-            )
-        except Exception as exc:  # noqa: BLE001 - instrument sidecar only
-            print(f"[calibration] aggregate-bet grading failed: {exc}", flush=True)
-
     def _sync_calibration_into_workspace(
         self, workspace_dir: Path, iteration: int
     ) -> None:
-        """Copy the run-level calibration into the proposer's cwd, plus the
-        previous iter's prediction as ``prev_prediction.md``, its mechanical
-        grade as ``prev_aggregate_grade.md``, and every earlier prediction
-        verbatim under ``predictions_history/``. Makes the calibration files
-        available at workspace-relative paths so SKILL.md doesn't depend on
-        knowing the docker mount layout.
+        """Stage the current world model and immediately previous prediction.
 
-        Hard no-op for the ``nowmc`` variant: the pure-default ablation carries
-        no calibration protocol at all (no prose file, no prediction, no
-        world model), so nothing is staged into the workspace.
+        The proposer grades its own prediction against shared raw evidence.
+        The nowmc arm receives no calibration files.
         """
 
         if self.config.proposer_variant == "nowmc":
@@ -1460,24 +1340,12 @@ class LocomoOptimizer:
         src = self.run_dir / "world_model_calibration.md"
         if src.exists():
             shutil.copy2(src, workspace_dir / "world_model_calibration.md")
-        seed_table = self.run_dir / "seed_task_table.json"
-        if seed_table.exists():
-            shutil.copy2(seed_table, workspace_dir / "seed_task_table.json")
         if iteration > 0:
             prev = (
                 self._iteration_dir(iteration - 1) / "workspace" / "prediction.md"
             )
             if prev.exists():
                 shutil.copy2(prev, workspace_dir / "prev_prediction.md")
-            grade = self._iteration_dir(iteration - 1) / "aggregate_grade.md"
-            if grade.exists():
-                shutil.copy2(grade, workspace_dir / "prev_aggregate_grade.md")
-        hist_dir = workspace_dir / "predictions_history"
-        for i in range(1, iteration):
-            src_pred = self._iteration_dir(i) / "workspace" / "prediction.md"
-            if src_pred.exists():
-                hist_dir.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(src_pred, hist_dir / f"iter_{i:03d}.md")
 
     def _sync_calibration_back_from_workspace(self, cwd: Path | None) -> None:
         """If the proposer appended to its workspace-local calibration copy,
@@ -1779,10 +1647,25 @@ class LocomoOptimizer:
             scaffold_extra=self.config.scaffold_extra,
         )
 
+    def _heldout_candidates(self, candidates: list[CandidateResult]) -> list[CandidateResult]:
+        """Select on train scores only, before any held-out evaluation.
+
+        Agent benchmarks use top-1 with earliest-iteration tie breaking.
+        Memory benchmarks retain the historical top-three train rule.
+        """
+        is_memory = self.config.progressive_target_system == "memgpt"
+        if is_memory:
+            ranked = self._quality_frontier(candidates)
+        else:
+            ranked = sorted(candidates, key=lambda c: (
+                -c.passrate, _candidate_iteration(c.candidate_id) or 0, c.candidate_id,
+            ))
+        default_limit = 3 if is_memory else 1
+        limit = self.config.test_frontier_candidate_limit or default_limit
+        return ranked[:max(0, int(limit))]
+
     def _run_test_frontier(self, candidates: list[CandidateResult]) -> dict[str, Any]:
-        full_frontier = self._quality_frontier(candidates)
-        candidate_limit = max(0, int(self.config.test_frontier_candidate_limit or 0))
-        frontier = full_frontier[:candidate_limit] if candidate_limit else full_frontier
+        frontier = self._heldout_candidates(candidates)
         test_dir = self.run_dir / "test_frontier"
         specs_dir = test_dir / "candidate_specs"
         specs_dir.mkdir(parents=True, exist_ok=True)
@@ -2790,7 +2673,7 @@ class LocomoOptimizer:
         calibration protocol, not the evidence surface. Best-effort.
         """
 
-        from worldcalib.prediction_feedback import (
+        from worldcalib.result_evidence import (
             load_score_breakdown,
             load_task_scores,
         )

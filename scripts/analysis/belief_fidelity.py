@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Post-hoc calibration test: does the calib world-model make predictions
+"""Simplified two-arm post-hoc diagnostic (not the full paper ablation): does the calib world-model make predictions
 *more accurate* than no world-model at all?
 
 Motivation
@@ -37,7 +37,7 @@ judge (same proposer stack, fresh context) returns ``WINNER: A|B|TIE``. We
 de-anonymise and tally ``calib_wm``'s win-rate vs ``no_wm``.
 
 Mechanical metrics (upside hit / downside recall / surprise regressions) are
-also computed per arm via :mod:`worldcalib.prediction_feedback` as an objective
+also computed per arm via :mod:`prediction_metrics` as an objective
 cross-check, but the headline result is the blind-judge win-rate.
 """
 
@@ -59,7 +59,7 @@ from worldcalib.claude_runner import (  # noqa: E402
     ProposerSandboxConfig,
     run_code_agent_prompt,
 )
-from worldcalib.prediction_feedback import (  # noqa: E402
+from prediction_metrics import (  # noqa: E402
     evaluate_prediction,
     per_type_deltas,
 )
