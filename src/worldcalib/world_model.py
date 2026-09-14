@@ -17,13 +17,6 @@ No experiments yet.
 
 No predictions graded yet.
 
-## Task map
-
-No tasks classified yet.
-
-## Residual
-
-Unknown until the seed evidence is classified.
 """
 
 

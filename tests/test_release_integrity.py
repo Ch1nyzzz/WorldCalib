@@ -52,7 +52,7 @@ def test_cli_exposes_only_paper_release_scope() -> None:
     assert BENCHMARKS == PAPER_BENCHMARKS
 
 
-@pytest.mark.parametrize("benchmark", ("webshop", "os"))
+@pytest.mark.parametrize("benchmark", ("webshop", "os", "agentbench", "tau2", "arc_agi2", "swebench", "autolab", "alfworld", "db"))
 def test_cli_rejects_explicitly_excluded_benchmarks(benchmark: str) -> None:
     with pytest.raises(SystemExit):
         build_parser().parse_args([benchmark, "--run-id", "boundary-test"])
@@ -97,8 +97,6 @@ def test_empty_world_model_matches_calibration_contract() -> None:
         "## Beliefs",
         "## Experiments",
         "## Calibration",
-        "## Task map",
-        "## Residual",
     ):
         assert heading in EMPTY_WORLD_MODEL
 

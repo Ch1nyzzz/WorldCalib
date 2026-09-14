@@ -1,6 +1,6 @@
 ---
-name: worldcalib-proposer-calibration-addon
-description: Shared self-distilled world-model calibration contract. This is the single calibrated-arm addition: maintain falsifiable beliefs and run each iteration as predict, observe, and correct.
+name: worldcalib-proposer-calib-addon
+description: The calibration layer (self-distill, NO external critic) layered onto the base proposer contract — the ONE thing that distinguishes the calib arm from the plain arm. It maintains an explicit, falsifiable MODEL of the environment in world_model_calibration.md (a mutable HEAD of beliefs + experiments + calibration, plus an append-only HISTORY of distill blocks) and runs one experiment per iteration as a single loop: predict → observe → correct. Frame-audit (read the raw evidence, attribute honestly) and probe-vs-exploit (run the experiment that buys information or cashes a gain) are not separate mechanisms — they are facets of that loop. No layer enum, no certified ceilings, no pre-seeded failure modes: the model starts empty and is filled only from this run's evidence. Shared by every calib arm (spliced after the base core).
 ---
 
 ## Self-distill environment calibration — the calib arm's one difference
@@ -26,33 +26,15 @@ Files staged into cwd (and promoted back) each iter:
 - **`./world_model_calibration.md`** — the model (below).
 - **`./prev_prediction.md`** — your previous iter's bet (present from iter ≥ 1).
   You grade it yourself.
-- **`./prev_aggregate_grade.md`** — the harness's mechanical read of your
-  previous iter's `## Aggregate bet (machine)` (present once a graded bet
-  exists). An instrument reading, not a veto: grade yourself FIRST, then
-  reconcile — when your grade and the mechanical read disagree, the
-  disagreement is itself evidence about how you read the environment.
-- **`./predictions_history/iter_NNN.md`** — every earlier iter's
-  `prediction.md`, verbatim, so you can audit your own longitudinal
-  calibration directly instead of trusting your HISTORY summaries of it.
 - **`./prediction.md`** — this iter's bet, written BEFORE you edit any source.
 - **`./runtime_config.md`** — ground-truth target model / base_url.
-- **`./seed_task_table.json`** — one mechanical row per seed task: both trial
-  scores, stable/unstable, CTRF passed/failed counts, timed-out, crashed,
-  duration, episode count. Facts only, no tier and no cause — those are what
-  you derive. Present from iter 1 on; the entry point for the Task map below.
 
 Layout — a **mutable HEAD** + an **append-only HISTORY**, split at the first
 `## iter_` heading:
 
-- **HEAD** (rewritten in place every iter — the live model), these lean sections:
+- **HEAD** (rewritten in place every iter — the live model), three lean sections:
   - **Beliefs** — falsifiable facts about the environment, each:
-    `[E<n>] <claim> | conf:<0.0–1.0> | status:<hypothesis|confirmed|refuted|unverifiable> | evidence:<openable pointers + task_ids> | mass:~<N> tasks it explains`
-    The evidence field must carry at least one pointer you can OPEN from this
-    workspace (a trace/span file, a `dumps/` file, a `task_score_matrix.json`
-    row) — never task_ids alone. A belief whose pointers cannot be opened here
-    is `unverifiable`: cap its conf at 0.3 until you re-ground it in evidence
-    you actually read this iter. This is what keeps the model auditable — a
-    later iter must be able to reopen your evidence and re-check the claim.
+    `[E<n>] <claim> | conf:<0.0–1.0> | status:<hypothesis|confirmed|refuted> | evidence:<trace task_ids / tool-call outputs> | mass:~<N> tasks it explains`
     A claim may say where it lives or whether it looks fixable when you actually
     know — but **start from an empty Beliefs list and fill it only from THIS
     run's evidence. Never pre-seed it with guessed failure modes**: an assumed
@@ -63,41 +45,6 @@ Layout — a **mutable HEAD** + an **append-only HISTORY**, split at the first
   - **Calibration** — how well your recent predictions held (behavioral H/N,
     aggregate H/N over the last ~4). This is the meta-signal for the next
     experiment: weak calibration means trust the model less and buy information.
-  - **Task map** — one line per task, a coarse and refutable estimate of how
-    *tractable* each task is for a harness change, filled from THIS run's
-    evidence (never pre-seeded):
-    `[T] <task_id> | tier:<gradient|ceiling|env|noise|unknown> | conf:<0.0–1.0> | why:<one clause tied to evidence> | evidence:<openable pointer> | seen:iter_<N>`
-    A tier carries an openable pointer exactly like a belief, so a later iter
-    can reopen it and recheck. The tiers estimate optimization tractability,
-    not failure mechanism:
-    - `gradient` — the harness plausibly moves it: a near-miss (some sub-tests
-      or partial credit already pass) or a stable-fail/unstable whose cause is
-      legible and lives in the editable surface.
-    - `ceiling` — all four evidence layers were present (question, full
-      rollout, consequences, gold) and you still cannot name a harness change
-      that would move it; the blocker reads as the SUT's own capability. This
-      is the WEAKEST tier: you can never certify a wall, only observe one has
-      not moved. Cap conf ≤0.7, keep it refutable, and any later score or
-      sub-test movement on that task drops it straight back to `unknown`.
-    - `env` — the zero is not the SUT's: verifier setup failed, the network was
-      cut, the sandbox ran out of disk. A fact about the environment, never the
-      model — excluded from every aggregate bet.
-    - `noise` — the runs disagree and each rollout self-reports success against
-      no checkable ground truth; the flip grades ~random and carries no gain
-      signal.
-    - `unknown` — the default until evidence earns a tier. An untriaged task is
-      `unknown`, never `ceiling` by assumption.
-    Cover every seed task once at iter 1 (below); after that, revise only the
-    tiers new evidence actually touches — do not re-triage the whole set.
-  - **Residual** — the model's uncovered *tractable* failure mass, recomputed
-    every iter: `<k>/<n> gradient-tier stable-fail tasks unclaimed by any
-    belief: <task_ids>`. A stable-fail task counts as claimed only if some
-    belief's mass includes it; ceiling/env/noise tasks are outside the residual
-    because no harness change is expected to move them. The unclaimed block is
-    where new beliefs come from — which part of it to buy next is your
-    judgment, but the number itself is not optional: a model that is precise on
-    2 beliefs while half the tractable failure mass is unclaimed is not yet a
-    good model.
 - **HISTORY** (append-only, from the first `## iter_` on) — one
   `## iter_PREV -> iter_THIS distill` block per iter. **Never edit or delete a
   prior block**; the harness refuses to let HISTORY shrink.
@@ -114,21 +61,8 @@ a. `cat ./runtime_config.md` for the ground-truth target model/base_url.
 b. `cat ./world_model_calibration.md`. If missing, abort and report.
 c. If `./prev_prediction.md` exists: read the **environment claim** it bet, then
    read the real outcome from `candidate_results/<id>.json` `tasks[]` vs the
-   **base iter's** `tasks[]`, plus the traces.
-
-   **Validate the measurement BEFORE grading it.** Open at least one trace /
-   transcript from the candidate's own eval and confirm the candidate's
-   distinctive change was actually live in it (its changed prompt text, its new
-   behavioral marker, its code path — something only the candidate, not the
-   base, would produce). An eval can silently run the wrong artifact; its
-   numbers then measure nothing about your mechanism. If you cannot find
-   positive evidence the change was live, the iteration is **VOID for the
-   environment model**: record it as a wiring miss in the distill block, do
-   NOT move any belief's conf from its numbers (in either direction), fix the
-   wiring, and re-run the experiment. A VOID iter is a fact about the harness,
-   never about the environment.
-
-   **Grade against the RAW evidence, not the agent's final message** — and RAW evidence is everything white-box: the
+   **base iter's** `tasks[]`, plus the traces. **Grade against the RAW evidence,
+   not the agent's final message** — and RAW evidence is everything white-box: the
    tool-call OUTPUTS, the trace turns, AND the harness source / control flow you
    can read directly. The harness control flow IS part of the environment you are
    modelling — not off-limits, not a black box. When a failure's cause is not
@@ -145,55 +79,20 @@ c. If `./prev_prediction.md` exists: read the **environment claim** it bet, then
      `task_score_matrix.json` row) disagree is UNSTABLE: exclude it, never read
      it as a flip. Averaging over the subset cancels per-task noise.
 
-   Grade against the WHOLE history, not just the last step. A belief's claim
-   about a subset must be consistent with those tasks' full
-   `task_score_matrix.json` rows — a task the belief calls blocked that passed
-   in some earlier iter refutes or bounds the claim. And when a row shows the
-   same task passing under one candidate and failing under another, the two
-   rollouts plus the known scaffold diff between them
-   (`reference_iterations/iter_NNN/` evidence + its `diff_digest.md`) form a
-   controlled comparison: read BOTH sides, not just the failing one. It is the
-   highest-information evidence in the workspace and costs two file reads.
-
-   If `./prev_aggregate_grade.md` exists, reconcile it with your own grade
-   before writing the model update: agreement raises trust in your reading;
-   disagreement means your reading of the environment is biased somewhere —
-   find where before you touch conf values.
-
-   The experiment resolves to ONE verdict, and **picking the right verdict IS
-   the correction** — each has its own evidence bar:
-
-   - **VOID** — the measurement check above found no proof the candidate was
-     live. A fact about the harness, never the environment: no belief moves in
-     either direction; fix the wiring, re-run.
-   - **Inert** — the candidate was live but its mechanism's behavioral
-     signature never appears in the traces (the mechanism itself is broken).
-     Nothing learned about the environment — fix and re-run.
-   - **Held** — the behavior appeared AND the subset moved as predicted: raise
-     conf, flip to `confirmed`.
-   - **Flat** — the behavior appeared, the subset didn't move: the layer you
-     blamed is not the bottleneck; lower the belief's conf. Flat means
-     *train-invisible*, not *worthless*: if the traces show correct
-     micro-decisions where the mechanism fires, you MAY retain it in the stack
-     — belief scoped `aggregate-invisible on train`, conf ≤0.5,
-     status:hypothesis. Retention is earned by that behavioral evidence alone
-     ("should generalize in theory" with no trace of it firing is clutter —
-     revert), and retained mechanisms are the first suspects when a later
-     experiment on the stack regresses.
-   - **Harmful / refuted** — needs BOTH layers: the aggregate drop AND trace
-     turns you can point at where the change produced the worse behavior. An
-     aggregate drop with no behavioral trace of its mechanism is **suspect,
-     not refutation** — one eval is one noisy draw; the drop may be harness or
-     noise, not your change. Write the anomaly down, keep the status, demote
-     only when a second look corroborates. One poisoned measurement
-     internalized as a belief costs every later iteration that trusts it —
-     beliefs must be harder to poison than scores.
-   - **Surface illusion** — the feedback's pre-baked label (a crash headline,
-     a final message that "looks like" failure) disagrees with the layer
-     underneath: the tool's actual output or the harness code path. Read that
-     lower layer and re-attribute the belief there; a label is itself a
-     surface claim, never the cause.
-
+   A missed prediction has only a few honest causes, and **picking the right one
+   IS the correction**:
+   - behavior unchanged → the candidate never wired in (impl bug; nothing learned
+     about the environment — fix and re-run);
+   - behavior changed but the subset didn't move → the layer you blamed is not
+     the bottleneck; the belief's causal claim is wrong — lower its confidence;
+   - the belief was an **illusion from reading the surface** (the agent's final
+     message looked like failure, but the layer underneath — the tool's actual
+     output, OR the harness code path that produced the behavior — tells a
+     different story) → read that lower layer, **including the source itself**,
+     and re-attribute the belief there. A pre-baked label in the feedback (e.g.
+     a crash headline) is itself a surface claim — verify it against the raw
+     traceback / counters / code, never take it as the cause;
+   - it held → raise confidence, flip to `confirmed`.
    Repeated disconfirmation simply keeps lowering a belief — **never read it as
    "the SUT is incapable."** You cannot certify a wall; you can only observe that
    a belief stopped paying and look elsewhere or one layer down.
@@ -206,34 +105,18 @@ c. If `./prev_prediction.md` exists: read the **environment claim** it bet, then
       ```
       ## iter_<PREV> -> iter_<THIS> distill (<ISO-8601 UTC>)
       - Experiment: information|gain / refine|explore — <one line>
-      - Measurement: <wired in — candidate's change seen live at <openable pointer> | VOID (wiring miss — no belief updated from these numbers)>
       - Claim graded: "<the env claim from prev_prediction>" relied on E<n>
-      - Behavioral (from traces): <held | inert (never fired) | flat (fired, subset unmoved) | surface-illusion → lower layer>
+      - Behavioral (from traces): <held | unchanged=impl bug | changed-but-flat=attribution wrong | surface-illusion → lower layer>
       - Aggregate (de-noised): subset (~<N>) predicted <±k>, got <actual>; stable regressions <r> (≤<m>)
       - Model update: E<n> conf <old→new>, status <→>; new/split beliefs: <E<m> ...>
       - Unstable (excluded): <task_ids whose runs / cross-iter row disagree>
       - Blind-spot: <task_ids that stably flipped pass→fail and were NOT anticipated → which belief missed them>
-      - Task map: <tiers changed this iter, e.g. "T foo ceiling→unknown (sub-tests moved 2→4)"; "none" if unchanged>
-      - Residual: <k>/<n> gradient-tier stable-fail unclaimed (prev iter: <k_prev>/<n_prev>)
       ```
    If `./prev_prediction.md` is absent (iter 0 had no proposer), skip the grade
    but still **bootstrap the HEAD** from the seed's traces (beliefs as
    `hypothesis`, Calibration 0/0) and append a `## iter_000 -> iter_001 distill`
-   block marked bootstrap. This bootstrap is the one time you **cover every seed
-   task in the Task map**: start from `seed_task_table.json` for the mechanical
-   row of each task, then open the evidence of the failing and unstable ones to
-   assign a tier (the passing ones can take their tier from the table alone).
-   Reading many tasks here is cheap and worth delegating to a subagent — the
-   point is to spend the later iterations' deep reads on the `gradient`/`unknown`
-   tasks and not re-litigate `ceiling`/`env`/`noise` every round. Later iters do
-   NOT re-triage the whole set; they revise only the tiers new evidence touches.
-d. **Refute stale tiers.** Any task whose score or CTRF sub-test counts moved
-   since it was last `seen` — read straight off `task_score_matrix.json` and the
-   new eval — drops to `unknown` and is re-triaged from the movement, whatever
-   tier it held. A `ceiling`/`env`/`noise` label that a later rollout contradicts
-   was a wrong estimate, not a property of the task; the movement is the
-   evidence that retires it.
-e. Re-read `./world_model_calibration.md` so the rest reasons from the latest HEAD.
+   block marked bootstrap.
+d. Re-read `./world_model_calibration.md` so the rest reasons from the latest HEAD.
 
 ### Choose the next experiment — let the model decide
 
@@ -267,21 +150,20 @@ E<n>: "<the belief this experiment tests or exploits>" | status:<hypothesis|conf
 ## Evidence that grades it
 - Behavioral: on the subset the agent will <do X instead of Y> — visible in trace turns / tool-call outputs
 - Aggregate (de-noised): the subset's mean stable-pass / score rises by ≥<k>; ≤<m> currently-stable tasks regress (the class designed not to hurt, and why)
-## Aggregate bet (machine) — parsed and graded mechanically; keep the exact format
-- subset: <task_id, task_id, ...>   ← a gain bet draws its subset from `gradient` (and, when buying information, `unknown`) tasks; `ceiling`/`env`/`noise` tasks do not belong in a subset you expect to move
-- min_mean_delta: <float — the predicted rise in the subset's stable pass-rate, e.g. 0.10>
-- max_stable_regressions: <int — run-wide stable pass→fail flips this change may cost>
 ## Falsification
 <which behavioral OR aggregate outcome, if it does NOT happen, refutes the claim and lowers E<n>>
 ```
 
 ## Invariants (every round)
 
-- Within a *single iteration*, a failed bet that **updates the model** is still
-  a SUCCESSFUL calibration step — never reward-hack or overfit to salvage one
-  iteration's score.
-- Bet the ENVIRONMENT's behavior on a subset, never which individual tasks
-  flip: single-task pass/fail sits below the noise floor and grades ~random.
-  (Stable-vs-unstable is defined under the Aggregate axis above.)
+- Within a *single iteration*, a failed bet that **updates the model** is still a
+  SUCCESSFUL calibration step — don't reward-hack or overfit to salvage one
+  score. This grades one iteration, not the run: the overall objective stays the
+  base Objective's — maximize passrate — and an accurate model is how you get
+  there.
+- Bet the ENVIRONMENT's behavior, never which individual tasks flip:
+  single-task pass/fail sits below the noise floor and grades ~random.
+- Read stable-vs-unstable from `task_score_matrix.json` — an oscillating row is
+  noise; never anchor on it, never read it as a flip.
 - The runtime **code stays general**: a prediction may name tasks, but the agent
   code may never branch on a `task_id` or embed an answer.

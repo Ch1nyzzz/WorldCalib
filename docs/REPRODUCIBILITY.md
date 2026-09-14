@@ -22,7 +22,15 @@ worldcalib-optimize locomo \
   --data-path /path/to/locomo10.json --split-path /path/to/splits.json
 ```
 
-Use `--test-frontier` to evaluate the selected train frontier on held-out.
+Use `--test-frontier` to evaluate on held-out. GAIA, AppWorld and TB2 select
+the highest train score, breaking ties by earliest iteration. Memory benchmarks
+evaluate three highest-train candidates; the paper reports the best held-out
+score among them. That memory procedure uses held-out scores for selection.
+A positive `--test-frontier-candidate-limit` explicitly overrides this rule.
+
+For Kimi, set both `KIMI_API_KEY` and `KIMI_BASE_URL` to matching credentials
+and a Claude-compatible endpoint. Explicit `--proposer-auth-token` and
+`--proposer-base-url` take precedence. Missing Kimi configuration fails early.
 
 ## Paper defaults
 
@@ -38,6 +46,9 @@ Provider-specific model identifiers and endpoints may differ. Record the exact
 resolved values with each run and never change them between matched arms.
 
 ## Benchmark examples
+
+The first four commands use the paper horizons. The last two are usage examples
+for the diagnostics, not full reproduction commands; they use five iterations.
 
 ```bash
 worldcalib-optimize longmemeval --run-id lme-calib \
@@ -63,16 +74,20 @@ worldcalib-optimize toolathlon --run-id toolathlon-diagnostic \
 
 ## Offline belief-fidelity analysis
 
-The paper's leave-one-out, informed-vs-uninformed predictor comparison is
-implemented in `scripts/analysis/belief_fidelity.py`. It requires explicit
-input and output directories; outputs remain ignored:
+The simplified two-arm diagnostic in `scripts/analysis/belief_fidelity.py`
+requires input/output directories, Kimi credentials and a Docker image with
+Claude Code installed:
 
 ```bash
 python scripts/analysis/belief_fidelity.py \
   --run-dir runs/locomo-calib \
-  --out-dir runs/_belief_fidelity/locomo-calib \
-  --sample 10
+  --out-dir runs/_belief_fidelity/locomo-calib --sample 10
 ```
+
+Ten candidates are a per-run example. The paper's full 40-candidate experiment
+also requires the falsified-document arm, second judge, original candidate
+manifests and aggregation; those are not bundled. See [provenance](PROTOCOL.md)
+for limits of final-document leave-one-out. These metrics are offline only.
 
 ## Verification
 

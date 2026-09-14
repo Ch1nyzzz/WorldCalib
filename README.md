@@ -1,5 +1,8 @@
 # WorldCalib
 
+Code for [Belief-Calibrated Optimization: An Explicit World Model for Agentic
+Optimization](https://arxiv.org/abs/2609.01861) (Chen et al., 2026).
+
 WorldCalib is the reference implementation for belief-calibrated scaffold
 optimization. An outer proposer edits an agent or memory scaffold; the
 calibrated arm maintains a persistent, falsifiable model of how the target
@@ -12,8 +15,34 @@ Toolathlon and Spider2-lite diagnostic implementations discussed in the
 limitations. WebShop, OS, and unrelated internal experiments are intentionally
 outside the release.
 
-No experiment outputs, cached trajectories, model credentials, benchmark data,
-or third-party checkouts are versioned.
+The current release tree excludes experiment outputs, cached trajectories,
+model credentials, benchmark contents and third-party checkouts. Frozen split
+identifiers are included. Historical Git commits may contain older artifacts.
+
+## Skill and calibration addon
+
+The [calibration addon](src/worldcalib/prompts/skills/shared/_calib_addon.md)
+is the 169-line protocol described in Appendix B. It maintains Beliefs,
+Experiments, Calibration and append-only history, following
+predict → observe → correct. The proposer grades its own predictions from
+raw evaluation evidence.
+
+Each benchmark's Skill assembles its environment surface, base contract and,
+for `calib`, that addon. For example:
+
+- [GAIA calibrated Skill](src/worldcalib/prompts/skills/gaia_calib/SKILL.md)
+- [GAIA control Skill](src/worldcalib/prompts/skills/gaia_nowmc/SKILL.md)
+- [GAIA environment surface](src/worldcalib/prompts/skills/gaia/_surface.md)
+- [Shared base contract](src/worldcalib/prompts/skills/shared/_base_core.md)
+
+Export a standalone Skill after installation:
+
+```bash
+python -m worldcalib.prompts.export gaia_calib --output GAIA_SKILL.md
+```
+
+This implements the paper-specified protocol. Exact historical prompt usage
+requires the original run archives. See [provenance](docs/PROTOCOL.md).
 
 ## Install
 
@@ -63,7 +92,7 @@ src/worldcalib/
   runners/           benchmark-neutral external runner infrastructure
   traces/            normalized trace capture and optional semantic lookup
   optimizer.py       shared propose → evaluate → update loop
-scripts/analysis/    paper-aligned offline belief-fidelity analysis
+scripts/analysis/    simplified offline prediction diagnostic
 tests/               unit and release-integrity tests
 docs/                benchmark, architecture, and reproduction notes
 ```
@@ -97,3 +126,20 @@ python -m build
 
 The benchmark table and split invariants are covered by tests so accidental
 scope drift is caught before release.
+
+## License and citation
+
+Original project code, Skill prompts and documentation use the [MIT License](LICENSE).
+External datasets, benchmarks, models and the paper retain their own licenses.
+See [third-party resources](docs/THIRD_PARTY.md).
+
+```bibtex
+@article{chen2026beliefcalibrated,
+  title={Belief-Calibrated Optimization: An Explicit World Model for Agentic Optimization},
+  author={Chen, Yuhan and Tian, Zhihua and Dabas, Mahavir and Peris, Charith and
+          Gupta, Rahul and Jin, Ming and Kang, Feiyang and Zhang, Siyuan and
+          Wang, Nan and Jia, Ruoxi},
+  journal={arXiv preprint arXiv:2609.01861},
+  year={2026}
+}
+```
